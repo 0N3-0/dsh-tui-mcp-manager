@@ -3,8 +3,6 @@
 面向 dsh-TUI 的原生 MCP Server 管理插件。输入 `/mcp-manager` 后，管理器通过宿主提供的
 managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile 的 `cordis.patch.yml`。
 
-Web Settings 前端保留在独立的 `dsh-mcp-manager` 仓库；本仓库不包含 React 或 Web client。
-
 ## 功能
 
 - 浮窗内查看服务器状态、初次连接后的工具数与错误。
@@ -40,9 +38,6 @@ dsh --profile dsh-tui
 /lang en
 ```
 
-不要在同一个 profile 同时安装 Web 包 `dsh-mcp-manager` 与本包；两者有意使用相同的
-managed block 数据格式以兼容旧配置，但应分别安装到 Web 与 TUI profile。
-
 ## 文件原生化
 
 `cordis.patch.yml` 是唯一事实源：
@@ -76,8 +71,8 @@ Cordis Loader / HMR
 # <<< dsh-mcp-manager: managed MCP server rows <<<
 ```
 
-保留旧 marker、row prefix 与 metadata key 是有意的：从早期合并版迁移到独立 TUI 包时，
-已有服务器无需复制。含 credential reference 的 row 会在下一次保存时使用
+保留旧 marker、row prefix 与 metadata key 是为了兼容已有配置，已有服务器无需复制。
+含 credential reference 的 row 会在下一次保存时使用
 `dsh-tui-mcp-manager/server` 适配器。
 
 写入采用旁路锁、同目录临时文件、fsync 和原子 rename。提交前会同时校验 managed block
