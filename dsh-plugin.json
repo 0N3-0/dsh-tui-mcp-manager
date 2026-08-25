@@ -1,0 +1,51 @@
+{
+  "$schema": "https://dsh.community/schemas/dsh-plugin-0.15.json",
+  "manifestVersion": "0.15",
+  "id": "com.dsh-tui.mcp-manager",
+  "name": "dsh-tui-mcp-manager",
+  "version": "0.1.0",
+  "description": "Native dsh-TUI dialog for managing file-backed MCP Loader rows in the active profile.",
+  "facets": {
+    "host": {
+      "entry": "lib/types/index.js",
+      "apiVersion": "v1alpha1"
+    }
+  },
+  "requires": {
+    "contracts": [
+      {
+        "apiVersion": "commands.dsh/v1alpha1",
+        "kind": "Command"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "name": "commands.invoke",
+      "scope": "dsh-tui.mcp-manager",
+      "reason": "Open and operate the /mcp-manager dialog from dsh-TUI."
+    }
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "dsh-tui.mcp-manager",
+        "title": "Manage MCP servers in dsh-TUI"
+      }
+    ]
+  },
+  "subscriptions": [],
+  "license": "MIT",
+  "compat": {
+    "hosts": [
+      "@deepseek-harness-tui/dsh-tui >=0.9.2 <0.10.0"
+    ]
+  },
+  "overrides": [
+    {
+      "target": "cordis.patch.yml",
+      "kind": "patch",
+      "description": "Adds the MCP manager host row to the selected dsh-TUI profile."
+    }
+  ]
+}
