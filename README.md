@@ -5,14 +5,15 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 
 ## 功能
 
-- 浮窗内查看服务器状态、初次连接后的工具数与错误。
+- 浮窗即时显示服务器状态；连接中的工具数显示为 `...`，可用 `↻ 刷新` 获取最新数量。
 - 添加、编辑、启停、重连和删除 MCP server。
 - 完整配置 stdio 与 streamable-http transport。
 - 编辑参数、工作目录、环境变量、请求头、超时、启动失败策略与自动重连参数。
 - 敏感环境变量和请求头通过任意 DSH credential reference 保存，不写死 credential 名称。
 - 字段编辑时按 Esc 回到表单总览并保留草稿；总览中的 Cancel 才放弃表单。
 - 跟随 dsh-TUI 的 `/lang zh` 与 `/lang en` 语言选择。
-- UI 文案只使用 ASCII 状态标签，不依赖 emoji 字宽。
+- 表格和表单字段按终端单元格对齐，不依赖普通空格通过宿主 sanitizer。
+- 图标沿用 dsh-TUI 风格的标准 Unicode 字符，不依赖 emoji 或私用区字体。
 
 ## 安装
 

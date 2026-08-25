@@ -18,6 +18,21 @@ export const name = 'dsh-tui-mcp-manager-dialog'
 
 type UiLang = 'zh' | 'en'
 
+interface IconSet {
+  states: Record<McpServerView['state'], string>
+  add: string
+  enable: string
+  disable: string
+  reconnect: string
+  edit: string
+  remove: string
+  back: string
+  field: string
+  save: string
+  cancel: string
+  ok: string
+}
+
 type TuiDialogs = Pick<TuiDialogRuntime, 'input' | 'select' | 'confirm'>
 
 interface CredentialProviderFace {
@@ -31,9 +46,31 @@ interface ServerFormSubmission {
 }
 
 const DIALOG_TIMEOUT_MS = 10 * 60_000
-const INITIAL_TOOL_SYNC_WAIT_MS = 5_000
-const INITIAL_TOOL_SYNC_POLL_MS = 100
 const PLUGIN_LOADED_AT = Date.now()
+
+// Match dsh-TUI's own figures: standard Unicode only, with no private-use,
+// emoji, font probing, or alternate icon modes.
+const ICONS: IconSet = {
+  states: {
+    connected: '\u2713',
+    starting: '\u25b6',
+    reconnecting: '\u21bb',
+    failed: '\u2717',
+    disabled: '\u25cb',
+    stopped: '\u00d7',
+  },
+  add: '+',
+  enable: '\u2713',
+  disable: '\u25cb',
+  reconnect: '\u21bb',
+  edit: '\u2192',
+  remove: '\u2717',
+  back: '\u2190',
+  field: '\u25c7',
+  save: '\u2713',
+  cancel: '\u00d7',
+  ok: '\u2713',
+}
 
 function debug(message: string): void {
   if (process.env.DSH_TUI_DEBUG === '1') {
@@ -42,34 +79,21 @@ function debug(message: string): void {
 }
 
 const EN = {
-  managerTitle: 'MCP Servers - profile {{profile}}',
-  add: '[ADD] Add server',
-  addDescription: 'Write a new server directly to cordis.patch.yml',
-  close: '[CLOSE] Close manager',
-  closeDescription: 'Return to chat',
-  serverActions: '{{name}} · {{state}}',
-  enable: '[ON] Enable',
-  disable: '[OFF] Disable',
-  toggleDescription: 'Persist the enabled state to cordis.patch.yml',
-  reconnect: '[RETRY] Reconnect',
-  reconnectDescription: 'Restart this MCP server process or connection',
-  edit: '[EDIT] Edit',
-  editDescription: 'Update the native MCP server configuration',
-  remove: '[DELETE] Delete',
-  removeDescription: 'Remove this server from cordis.patch.yml',
-  back: '[BACK] Back',
-  backDescription: 'Return to the server list',
+  managerTitle: 'MCP Servers - {{profile}} | {{connected}}/{{servers}} ready | {{tools}} tools',
+  add: 'Add server',
+  refresh: 'Refresh',
+  serverActions: '{{name}} {{tag}} | {{transport}} | {{tools}}',
+  enable: 'Enable',
+  disable: 'Disable',
+  reconnect: 'Reconnect',
+  edit: 'Edit',
+  remove: 'Delete',
+  back: 'Back',
   enabled: 'enabled',
   disabled: 'disabled',
   tools: '{{count}} tools',
-  stateConnected: 'connected',
-  stateStarting: 'starting',
-  stateReconnecting: 'reconnecting',
-  stateFailed: 'failed',
-  stateDisabled: 'disabled',
-  stateStopped: 'stopped',
   errorTitle: 'MCP Manager error',
-  ok: '[OK] OK',
+  ok: 'OK',
   serverId: 'Add MCP server — ID',
   serverIdPlaceholder: 'lowercase letters, numbers, dot, underscore, or dash',
   displayName: '{{mode}} MCP server — display name',
@@ -135,9 +159,9 @@ const EN = {
   formMaxDelay: 'Maximum reconnect delay',
   formMaxAttempts: 'Maximum reconnect attempts',
   formCredential: 'Credential {{ref}}',
-  formSave: '[SAVE] Save and apply',
+  formSave: 'Save and apply',
   formSaveDescription: 'Validate every field and write this server to cordis.patch.yml',
-  formCancel: '[CANCEL] Cancel',
+  formCancel: 'Cancel',
   formCancelDescription: 'Discard this form and return to the manager',
   valueEmpty: '(empty)',
   valueEntries: '{{count}} entries',
@@ -148,41 +172,28 @@ const EN = {
   valuePending: 'new value ready to save',
   confirmDelete: 'Delete MCP server?',
   confirmDeleteMessage: 'Remove “{{name}}” from cordis.patch.yml?',
-  confirmDeleteButton: '[DELETE] Delete',
+  confirmDeleteButton: 'Delete',
   cancel: 'Cancel',
 } as const
 
 type CopyKey = keyof typeof EN
 
 const ZH: Record<CopyKey, string> = {
-  managerTitle: 'MCP 服务器 - 配置 {{profile}}',
-  add: '[ADD] 添加服务器',
-  addDescription: '将新服务器直接写入 cordis.patch.yml',
-  close: '[CLOSE] 关闭管理器',
-  closeDescription: '返回聊天界面',
-  serverActions: '{{name}} · {{state}}',
-  enable: '[ON] 启用',
-  disable: '[OFF] 停用',
-  toggleDescription: '将启用状态持久化到 cordis.patch.yml',
-  reconnect: '[RETRY] 重新连接',
-  reconnectDescription: '重启这个 MCP 服务器进程或连接',
-  edit: '[EDIT] 编辑',
-  editDescription: '修改原生 MCP 服务器配置',
-  remove: '[DELETE] 删除',
-  removeDescription: '从 cordis.patch.yml 移除这个服务器',
-  back: '[BACK] 返回',
-  backDescription: '返回服务器列表',
+  managerTitle: 'MCP 服务器 - {{profile}} | {{connected}}/{{servers}} 已连接 | {{tools}} 个工具',
+  add: '添加服务器',
+  refresh: '刷新',
+  serverActions: '{{name}} {{tag}} | {{transport}} | {{tools}}',
+  enable: '启用',
+  disable: '停用',
+  reconnect: '重新连接',
+  edit: '编辑',
+  remove: '删除',
+  back: '返回',
   enabled: '已启用',
   disabled: '已停用',
   tools: '{{count}} 个工具',
-  stateConnected: '已连接',
-  stateStarting: '启动中',
-  stateReconnecting: '重连中',
-  stateFailed: '失败',
-  stateDisabled: '已停用',
-  stateStopped: '已停止',
   errorTitle: 'MCP 管理器错误',
-  ok: '[OK] 确定',
+  ok: '确定',
   serverId: '添加 MCP 服务器 — ID',
   serverIdPlaceholder: '小写字母、数字、点、下划线或短横线',
   displayName: '{{mode}} MCP 服务器 — 显示名称',
@@ -248,9 +259,9 @@ const ZH: Record<CopyKey, string> = {
   formMaxDelay: '最大重连延迟',
   formMaxAttempts: '最大重连次数',
   formCredential: '凭据 {{ref}}',
-  formSave: '[SAVE] 保存并应用',
+  formSave: '保存并应用',
   formSaveDescription: '校验全部字段并将该服务器写入 cordis.patch.yml',
-  formCancel: '[CANCEL] 取消',
+  formCancel: '取消',
   formCancelDescription: '放弃本表单并返回管理器',
   valueEmpty: '（空）',
   valueEntries: '{{count}} 项',
@@ -261,7 +272,7 @@ const ZH: Record<CopyKey, string> = {
   valuePending: '新值已准备保存',
   confirmDelete: '删除 MCP 服务器？',
   confirmDeleteMessage: '要从 cordis.patch.yml 中移除“{{name}}”吗？',
-  confirmDeleteButton: '[DELETE] 删除',
+  confirmDeleteButton: '删除',
   cancel: '取消',
 }
 
@@ -275,6 +286,10 @@ function copy(lang: UiLang, key: CopyKey, values: Record<string, string | number
 
 function asLang(value: unknown): UiLang | undefined {
   return value === 'zh' || value === 'en' ? value : undefined
+}
+
+function iconLabel(icon: string, label: string): string {
+  return `${icon} ${label}`
 }
 
 export async function resolveTuiLanguage(ctx: any): Promise<UiLang> {
@@ -341,7 +356,7 @@ export function applyTui(ctx: Context): void {
         name: 'mcp-manager',
         description: 'Open the native MCP server manager dialog',
         handler: async () => {
-          await runManager(tuiCtx, dialogs, manager, credentials)
+          await runManager(tuiCtx, dialogs, manager, credentials, ICONS)
           return { kind: 'success' as const }
         },
       }
@@ -383,84 +398,56 @@ async function runManager(
   dialogs: TuiDialogs,
   manager: McpManagerService,
   credentials: CredentialProviderFace,
+  icons: IconSet,
 ): Promise<void> {
-  const waitedForInitialSync = new Set<string>()
   while (true) {
     const lang = await resolveTuiLanguage(ctx)
     let snapshot: McpManagerSnapshot
     try {
       snapshot = await manager.invoke('list', {})
-      snapshot = await settleInitialToolSync(manager, snapshot, waitedForInitialSync)
     } catch (error) {
-      await showError(dialogs, lang, error)
+      await showError(dialogs, lang, icons, error)
       return
     }
 
+    const connected = snapshot.servers.filter((server) => server.state === 'connected').length
+    const toolCount = snapshot.servers.reduce((total, server) => total + server.tools.length, 0)
     const choice = await dialogs.select({
-      title: copy(lang, 'managerTitle', { profile: snapshot.profile.key }),
+      title: copy(lang, 'managerTitle', {
+        profile: snapshot.profile.key,
+        connected,
+        servers: snapshot.servers.length,
+        tools: toolCount,
+      }),
       options: [
-        ...snapshot.servers.map((server) => ({
-          id: `server:${server.id}`,
-          label: `${stateTag(server.state)} ${server.name}`,
-          description: descriptionLine(serverDescription(lang, server)),
-        })),
-        { id: 'add', label: copy(lang, 'add'), description: descriptionLine(copy(lang, 'addDescription')) },
-        { id: 'close', label: copy(lang, 'close'), description: descriptionLine(copy(lang, 'closeDescription')) },
+        ...serverListOptions(lang, snapshot.servers, icons),
+        { id: 'add', label: iconLabel(icons.add, copy(lang, 'add')) },
+        { id: 'refresh', label: iconLabel(icons.reconnect, copy(lang, 'refresh')) },
       ],
       timeoutMs: DIALOG_TIMEOUT_MS,
     })
 
-    if (!choice || choice === 'close') return
+    if (!choice) return
+
+    if (choice === 'refresh') continue
 
     if (choice === 'add') {
-      const input = await askForServer(dialogs, lang, snapshot, credentials)
+      const input = await askForServer(dialogs, lang, snapshot, credentials, icons)
       if (!input) continue
       try {
         await persistCredentialValues(credentials, input.credentialValues)
         await manager.invoke('upsert', { server: input.record })
       } catch (error) {
-        await showError(dialogs, lang, error)
+        await showError(dialogs, lang, icons, error)
       }
       continue
     }
 
     if (choice.startsWith('server:')) {
       const serverId = choice.slice('server:'.length)
-      if (await runServerActions(ctx, dialogs, manager, credentials, serverId)) {
-        waitedForInitialSync.delete(serverId)
-      }
+      await runServerActions(ctx, dialogs, manager, credentials, icons, serverId)
     }
   }
-}
-
-/**
- * Native TUI select dialogs are immutable once opened. Give Loader rows that
- * are still starting a short chance to publish their initial MCP tool set so
- * the first rendered dialog contains the real count. Slow servers remain
- * usable as [START] entries after the bound instead of blocking the TUI.
- */
-async function settleInitialToolSync(
-  manager: McpManagerService,
-  initial: McpManagerSnapshot,
-  waited: Set<string>,
-): Promise<McpManagerSnapshot> {
-  const ids = initial.servers
-    .filter((server) => server.enabled && server.state === 'starting' && !waited.has(server.id))
-    .map((server) => server.id)
-  if (ids.length === 0) return initial
-  ids.forEach((id) => waited.add(id))
-
-  const deadline = Date.now() + INITIAL_TOOL_SYNC_WAIT_MS
-  let snapshot = initial
-  do {
-    await new Promise<void>((resolve) => setTimeout(resolve, INITIAL_TOOL_SYNC_POLL_MS))
-    snapshot = await manager.invoke('list', {})
-    const stillStarting = ids.some((id) =>
-      snapshot.servers.some((server) => server.id === id && server.enabled && server.state === 'starting'),
-    )
-    if (!stillStarting) break
-  } while (Date.now() < deadline)
-  return snapshot
 }
 
 async function runServerActions(
@@ -468,6 +455,7 @@ async function runServerActions(
   dialogs: TuiDialogs,
   manager: McpManagerService,
   credentials: CredentialProviderFace,
+  icons: IconSet,
   serverId: string,
 ): Promise<boolean> {
   while (true) {
@@ -476,35 +464,35 @@ async function runServerActions(
     try {
       snapshot = await manager.invoke('list', {})
     } catch (error) {
-      await showError(dialogs, lang, error)
+      await showError(dialogs, lang, icons, error)
       return false
     }
     const server = snapshot.servers.find((item) => item.id === serverId)
     if (!server) return false
 
     const choice = await dialogs.select({
-      title: `${stateTag(server.state)} ${copy(lang, 'serverActions', {
+      title: copy(lang, 'serverActions', {
         name: server.name,
-        state: stateLabel(lang, server.state),
-      })}`,
+        tag: stateTag(server.state, icons),
+        transport: server.transport,
+        tools: copy(lang, 'tools', { count: server.tools.length }),
+      }),
       options: [
         {
           id: 'toggle',
-          label: copy(lang, server.enabled ? 'disable' : 'enable'),
-          description: descriptionLine(copy(lang, 'toggleDescription')),
+          label: iconLabel(server.enabled ? icons.disable : icons.enable, copy(lang, server.enabled ? 'disable' : 'enable')),
         },
         ...(server.enabled
           ? [
               {
                 id: 'reconnect',
-                label: copy(lang, 'reconnect'),
-                description: descriptionLine(copy(lang, 'reconnectDescription')),
+                label: iconLabel(icons.reconnect, copy(lang, 'reconnect')),
               },
             ]
           : []),
-        { id: 'edit', label: copy(lang, 'edit'), description: descriptionLine(copy(lang, 'editDescription')) },
-        { id: 'delete', label: copy(lang, 'remove'), description: descriptionLine(copy(lang, 'removeDescription')) },
-        { id: 'back', label: copy(lang, 'back'), description: descriptionLine(copy(lang, 'backDescription')) },
+        { id: 'edit', label: iconLabel(icons.edit, copy(lang, 'edit')) },
+        { id: 'delete', label: iconLabel(icons.remove, copy(lang, 'remove')) },
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
       ],
       timeoutMs: DIALOG_TIMEOUT_MS,
     })
@@ -521,7 +509,7 @@ async function runServerActions(
         return true
       }
       if (choice === 'edit') {
-        const input = await askForServer(dialogs, lang, snapshot, credentials, server)
+        const input = await askForServer(dialogs, lang, snapshot, credentials, icons, server)
         if (input) {
           await persistCredentialValues(credentials, input.credentialValues)
           await manager.invoke('upsert', { server: input.record })
@@ -533,8 +521,8 @@ async function runServerActions(
         const confirmed = await dialogs.confirm({
           title: copy(lang, 'confirmDelete'),
           message: copy(lang, 'confirmDeleteMessage', { name: server.name }),
-          confirmLabel: copy(lang, 'confirmDeleteButton'),
-          cancelLabel: copy(lang, 'cancel'),
+          confirmLabel: iconLabel(icons.remove, copy(lang, 'confirmDeleteButton')),
+          cancelLabel: iconLabel(icons.cancel, copy(lang, 'cancel')),
           timeoutMs: DIALOG_TIMEOUT_MS,
         })
         if (confirmed) {
@@ -543,7 +531,7 @@ async function runServerActions(
         }
       }
     } catch (error) {
-      await showError(dialogs, lang, error)
+      await showError(dialogs, lang, icons, error)
     }
   }
 }
@@ -553,6 +541,7 @@ async function askForServer(
   lang: UiLang,
   snapshot: McpManagerSnapshot,
   credentials: CredentialProviderFace,
+  icons: IconSet,
   existing?: McpServerView,
 ): Promise<ServerFormSubmission | undefined> {
   const mode = copy(lang, existing ? 'editMode' : 'addMode')
@@ -591,7 +580,7 @@ async function askForServer(
   }
 
   const fail = async (key: CopyKey): Promise<false> => {
-    await showError(dialogs, lang, new Error(copy(lang, key)))
+    await showError(dialogs, lang, icons, new Error(copy(lang, key)))
     return false
   }
 
@@ -778,11 +767,11 @@ async function askForServer(
           if (value === undefined) return 'back'
           if (value === '') {
             if (info.configured || draft.credentialValues[ref] !== undefined) return 'accepted'
-            await showError(dialogs, lang, new Error(copy(lang, 'credentialRequired', { ref })))
+            await showError(dialogs, lang, icons, new Error(copy(lang, 'credentialRequired', { ref })))
             return 'retry'
           }
           if (!info.writable) {
-            await showError(dialogs, lang, new Error(copy(lang, 'credentialReadOnly', { ref })))
+            await showError(dialogs, lang, icons, new Error(copy(lang, 'credentialReadOnly', { ref })))
             return 'retry'
           }
           draft.credentialValues[ref] = value
@@ -935,7 +924,7 @@ async function askForServer(
     for (const ref of credentialReferences()) {
       const info = await credentials.describe(credentialRef(ref)).catch(() => ({ configured: false, writable: false }))
       if (!info.configured && draft.credentialValues[ref] === undefined) {
-        await showError(dialogs, lang, new Error(copy(lang, 'credentialRequired', { ref })))
+        await showError(dialogs, lang, icons, new Error(copy(lang, 'credentialRequired', { ref })))
         return false
       }
     }
@@ -944,17 +933,26 @@ async function askForServer(
 
   while (true) {
     const steps = buildSteps()
-    const fieldOptions = await Promise.all(steps.map(async (step) => ({
-      id: `field:${step.key}`,
-      label: `[FIELD] ${labelFor(step.key)}`,
-      description: descriptionLine(await summaryFor(step.key)),
+    const fields = await Promise.all(steps.map(async (step) => ({
+      step,
+      name: truncateToCells(labelFor(step.key), 28),
+      value: truncateToCells(await summaryFor(step.key), 42),
     })))
+    const fieldNameWidth = Math.max(0, ...fields.map((field) => terminalCellWidth(field.name)))
+    const fieldOptions = fields.map(({ step, name, value }) => ({
+      id: `field:${step.key}`,
+      label: [
+        icons.field,
+        padToCells(name, fieldNameWidth),
+        value,
+      ].join(PAD_CELL.repeat(2)),
+    }))
     const choice = await dialogs.select({
       title: copy(lang, 'formTitle', { mode, id: draft.id }),
       options: [
         ...fieldOptions,
-        { id: 'save', label: copy(lang, 'formSave'), description: descriptionLine(copy(lang, 'formSaveDescription')) },
-        { id: 'cancel', label: copy(lang, 'formCancel'), description: descriptionLine(copy(lang, 'formCancelDescription')) },
+        { id: 'save', label: iconLabel(icons.save, copy(lang, 'formSave')) },
+        { id: 'cancel', label: iconLabel(icons.cancel, copy(lang, 'formCancel')) },
       ],
       timeoutMs: DIALOG_TIMEOUT_MS,
     })
@@ -1026,13 +1024,13 @@ async function ask(
   return dialogs.input({ title, placeholder, initial, timeoutMs: DIALOG_TIMEOUT_MS })
 }
 
-async function showError(dialogs: TuiDialogs, lang: UiLang, error: unknown): Promise<void> {
+async function showError(dialogs: TuiDialogs, lang: UiLang, icons: IconSet, error: unknown): Promise<void> {
   await dialogs.select({
     title: copy(lang, 'errorTitle'),
     options: [
       {
         id: 'ok',
-        label: copy(lang, 'ok'),
+        label: iconLabel(icons.ok, copy(lang, 'ok')),
         description: error instanceof Error ? error.message : String(error),
       },
     ],
@@ -1040,40 +1038,92 @@ async function showError(dialogs: TuiDialogs, lang: UiLang, error: unknown): Pro
   })
 }
 
-function stateLabel(lang: UiLang, state: McpServerView['state']): string {
-  const key: Record<McpServerView['state'], CopyKey> = {
-    connected: 'stateConnected',
-    starting: 'stateStarting',
-    reconnecting: 'stateReconnecting',
-    failed: 'stateFailed',
-    disabled: 'stateDisabled',
-    stopped: 'stateStopped',
+function serverListOptions(lang: UiLang, servers: readonly McpServerView[], icons: IconSet) {
+  const names = servers.map((server) => truncateToCells(server.name, 24))
+  const toolCounts = servers.map((server) =>
+    server.tools.length === 0 && (server.state === 'starting' || server.state === 'reconnecting')
+      ? '...'
+      : String(server.tools.length),
+  )
+  const nameWidth = Math.max(0, ...names.map(terminalCellWidth))
+  const tagWidth = Math.max(0, ...servers.map((server) => terminalCellWidth(stateTag(server.state, icons))))
+  const toolCountWidth = Math.max(1, ...toolCounts.map(terminalCellWidth))
+
+  return servers.map((server, index) => ({
+    id: `server:${server.id}`,
+    label: [
+      padToCells(names[index] ?? server.name, nameWidth),
+      padToCells(stateTag(server.state, icons), tagWidth),
+      copy(lang, 'tools', { count: (toolCounts[index] ?? '0').padStart(toolCountWidth, PAD_CELL) }),
+    ].join(PAD_CELL.repeat(2)),
+  }))
+}
+
+function stateTag(state: McpServerView['state'], icons: IconSet): string {
+  return icons.states[state]
+}
+
+// The managed-dialog sanitizer collapses every Unicode whitespace run. U+2800
+// is a single-cell blank glyph rather than whitespace, so table padding
+// survives the public dialog boundary and keeps terminal columns aligned.
+const PAD_CELL = '\u2800'
+
+function terminalCellWidth(text: string): number {
+  let width = 0
+  for (const character of text) width += characterCellWidth(character)
+  return width
+}
+
+function padToCells(text: string, width: number): string {
+  return text + PAD_CELL.repeat(Math.max(0, width - terminalCellWidth(text)))
+}
+
+function truncateToCells(text: string, maxWidth: number): string {
+  if (terminalCellWidth(text) <= maxWidth) return text
+  const suffix = '...'
+  const contentWidth = Math.max(0, maxWidth - suffix.length)
+  let result = ''
+  let width = 0
+  for (const character of text) {
+    const nextWidth = characterCellWidth(character)
+    if (width + nextWidth > contentWidth) break
+    result += character
+    width += nextWidth
   }
-  return copy(lang, key[state])
+  return result + suffix
 }
 
-function serverDescription(lang: UiLang, server: McpServerView): string {
-  return [
-    server.serverName,
-    stateLabel(lang, server.state),
-    copy(lang, 'tools', { count: server.tools.length }),
-  ].join(' · ')
+function characterCellWidth(character: string): number {
+  const codePoint = character.codePointAt(0) ?? 0
+  if (
+    codePoint === 0
+    || codePoint < 0x20
+    || (codePoint >= 0x7f && codePoint < 0xa0)
+    || codePoint === 0x200d
+    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+    || /\p{Mark}/u.test(character)
+  ) return 0
+  if (/\p{Extended_Pictographic}/u.test(character) || isWideCodePoint(codePoint)) return 2
+  return 1
 }
 
-function stateTag(state: McpServerView['state']): string {
-  const icons: Record<McpServerView['state'], string> = {
-    connected: '[READY]',
-    starting: '[START]',
-    reconnecting: '[RETRY]',
-    failed: '[ERROR]',
-    disabled: '[OFF]',
-    stopped: '[STOP]',
-  }
-  return icons[state]
-}
-
-function descriptionLine(text: string): string {
-  return `-- ${text}`
+function isWideCodePoint(codePoint: number): boolean {
+  return codePoint >= 0x1100 && (
+    codePoint <= 0x115f
+    || codePoint === 0x2329
+    || codePoint === 0x232a
+    || (codePoint >= 0x2e80 && codePoint <= 0x303e)
+    || (codePoint >= 0x3040 && codePoint <= 0xa4cf && codePoint !== 0x303f)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    || (codePoint >= 0x1b000 && codePoint <= 0x1b2ff)
+    || (codePoint >= 0x1f200 && codePoint <= 0x1f251)
+    || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+  )
 }
 
 function nextServerId(snapshot: McpManagerSnapshot): string {
