@@ -8,10 +8,12 @@ import type { TuiDialogRuntime } from '@deepseek-harness-tui/dsh-tui/extensions'
 import type { TuiPluginHost } from '@deepseek-harness-tui/dsh-tui/plugin-host'
 import type { McpManagerService } from '../host/manager.js'
 import type {
+  ManagedSetRecord,
   ManagedServerRecord,
   McpDoctorCheck,
   McpManagerSnapshot,
   McpServerView,
+  McpSetView,
   McpToolView,
   SecretHeaderRef,
 } from '../host/types.js'
@@ -81,8 +83,7 @@ function debug(message: string): void {
 }
 
 const EN = {
-  managerTitle: 'MCP Servers - {{profile}} | {{connected}}/{{servers}} ready | {{tools}} tools',
-  add: 'Add server',
+  managerTitle: 'MCP Servers - {{profile}} | {{connected}}/{{servers}} ready | {{tools}} tools | set: {{set}}',
   refresh: 'Refresh',
   serverActions: '{{name}} {{tag}} | {{transport}} | {{tools}}',
   enable: 'Enable',
@@ -91,6 +92,44 @@ const EN = {
   inspect: 'Inspect',
   doctor: 'Doctor',
   duplicate: 'Duplicate',
+  sets: 'MCP Sets',
+  noActiveSet: 'Default',
+  createSet: 'Create set',
+  setActions: '{{name}} | {{count}} servers',
+  activateSet: 'Enable this set',
+  deactivateSet: 'Disable this set',
+  editSet: 'Edit set',
+  addServerToSet: 'Add server',
+  addNewServer: 'Add a new MCP server',
+  setServerPoolTitle: '{{name}} - server pool',
+  addExistingToSet: 'Add to this set',
+  removeExistingFromSet: 'Remove from this set',
+  collapseSet: 'Collapse members',
+  expandSet: 'Expand members',
+  deleteSet: 'Delete set',
+  setFormTitle: '{{mode}} MCP set - {{id}}',
+  setId: 'ID',
+  setName: 'Display name',
+  setMembers: 'Server members',
+  setAddMember: 'Add server member',
+  setColumnName: 'name',
+  setColumnId: 'ID',
+  setColumnNamespace: 'namespace',
+  setColumnTransport: 'transport',
+  setColumnState: 'state',
+  setColumnTools: 'tools',
+  setSave: 'Save set',
+  setCancel: 'Cancel',
+  setCreateMode: 'Create',
+  setEditMode: 'Edit',
+  setIdPrompt: 'Create MCP set - ID',
+  setIdPlaceholder: 'lowercase letters, numbers, dot, underscore, or dash',
+  setNamePrompt: '{{mode}} MCP set - display name',
+  setNamePlaceholder: 'for example: Research',
+  invalidSetId: 'Set ID must match [a-z0-9][a-z0-9._-]{0,63}.',
+  invalidSetName: 'Set display name must contain 1 to 80 characters.',
+  confirmDeleteSet: 'Delete MCP set?',
+  confirmDeleteSetMessage: 'Delete “{{name}}”? Server configurations are not changed.',
   doctorTitle: '{{name}} | Doctor {{state}}',
   doctorStorage: 'Profile storage',
   doctorLoader: 'Loader row',
@@ -174,10 +213,7 @@ const EN = {
   invalidPositiveNumber: 'Enter a positive finite number no greater than 2147483647.',
   invalidPositiveInteger: 'Enter a positive integer.',
   invalidReconnectDelays: 'Initial reconnect delay must be less than or equal to maximum reconnect delay.',
-  escBack: 'Esc: previous field',
-  escCancel: 'Esc: cancel form',
   escForm: 'Esc: return to form',
-  enabledPrompt: '{{mode}} MCP server — initial state',
   addMode: 'Add',
   editMode: 'Edit',
   duplicateMode: 'Duplicate',
@@ -196,16 +232,13 @@ const EN = {
   formSecretHeaders: 'Secret header references',
   formToolTimeout: 'Tool-call timeout',
   formFailStartup: 'Fail on startup error',
-  formEnabled: 'Enabled in this profile',
   formReconnect: 'Automatic reconnect',
   formInitialDelay: 'Initial reconnect delay',
   formMaxDelay: 'Maximum reconnect delay',
   formMaxAttempts: 'Maximum reconnect attempts',
   formCredential: 'Credential {{ref}}',
   formSave: 'Save and apply',
-  formSaveDescription: 'Validate every field and write this server to cordis.patch.yml',
   formCancel: 'Cancel',
-  formCancelDescription: 'Discard this form and return to the manager',
   valueEmpty: '(empty)',
   valueEntries: '{{count}} entries',
   valueArgs: '{{count}} arguments',
@@ -222,8 +255,7 @@ const EN = {
 type CopyKey = keyof typeof EN
 
 const ZH: Record<CopyKey, string> = {
-  managerTitle: 'MCP 服务器 - {{profile}} | {{connected}}/{{servers}} 已连接 | {{tools}} 个工具',
-  add: '添加服务器',
+  managerTitle: 'MCP 服务器 - {{profile}} | {{connected}}/{{servers}} 已连接 | {{tools}} 个工具 | 集合：{{set}}',
   refresh: '刷新',
   serverActions: '{{name}} {{tag}} | {{transport}} | {{tools}}',
   enable: '启用',
@@ -232,6 +264,44 @@ const ZH: Record<CopyKey, string> = {
   inspect: '检查详情',
   doctor: '诊断',
   duplicate: '复制',
+  sets: 'MCP 集合',
+  noActiveSet: '默认',
+  createSet: '创建集合',
+  setActions: '{{name}} | {{count}} 个服务器',
+  activateSet: '启用此集合',
+  deactivateSet: '停用此集合',
+  editSet: '编辑集合',
+  addServerToSet: '添加服务器',
+  addNewServer: '添加全新的 MCP 服务器',
+  setServerPoolTitle: '{{name}} - 服务器池',
+  addExistingToSet: '加入当前集合',
+  removeExistingFromSet: '移出当前集合',
+  collapseSet: '折叠成员',
+  expandSet: '展开成员',
+  deleteSet: '删除集合',
+  setFormTitle: '{{mode}} MCP 集合 - {{id}}',
+  setId: 'ID',
+  setName: '显示名称',
+  setMembers: '服务器成员',
+  setAddMember: '添加服务器成员',
+  setColumnName: '名称',
+  setColumnId: 'ID',
+  setColumnNamespace: '命名空间',
+  setColumnTransport: '传输',
+  setColumnState: '状态',
+  setColumnTools: '工具',
+  setSave: '保存集合',
+  setCancel: '取消',
+  setCreateMode: '创建',
+  setEditMode: '编辑',
+  setIdPrompt: '创建 MCP 集合 - ID',
+  setIdPlaceholder: '小写字母、数字、点、下划线或短横线',
+  setNamePrompt: '{{mode}} MCP 集合 - 显示名称',
+  setNamePlaceholder: '例如：研究',
+  invalidSetId: '集合 ID 必须匹配 [a-z0-9][a-z0-9._-]{0,63}。',
+  invalidSetName: '集合显示名称必须包含 1 到 80 个字符。',
+  confirmDeleteSet: '删除 MCP 集合？',
+  confirmDeleteSetMessage: '要删除“{{name}}”吗？服务器配置不会改变。',
   doctorTitle: '{{name}} | 诊断 {{state}}',
   doctorStorage: 'Profile 存储',
   doctorLoader: 'Loader 配置行',
@@ -315,10 +385,7 @@ const ZH: Record<CopyKey, string> = {
   invalidPositiveNumber: '请输入不大于 2147483647 的有限正数。',
   invalidPositiveInteger: '请输入正整数。',
   invalidReconnectDelays: '初始重连延迟不能大于最大重连延迟。',
-  escBack: 'Esc：返回上一项',
-  escCancel: 'Esc：取消表单',
   escForm: 'Esc：返回表单',
-  enabledPrompt: '{{mode}} MCP 服务器 — 初始状态',
   addMode: '添加',
   editMode: '编辑',
   duplicateMode: '复制',
@@ -337,16 +404,13 @@ const ZH: Record<CopyKey, string> = {
   formSecretHeaders: '敏感请求头引用',
   formToolTimeout: '工具调用超时',
   formFailStartup: '启动错误时失败',
-  formEnabled: '在此 profile 中启用',
   formReconnect: '自动重连',
   formInitialDelay: '初始重连延迟',
   formMaxDelay: '最大重连延迟',
   formMaxAttempts: '最大重连次数',
   formCredential: '凭据 {{ref}}',
   formSave: '保存并应用',
-  formSaveDescription: '校验全部字段并将该服务器写入 cordis.patch.yml',
   formCancel: '取消',
-  formCancelDescription: '放弃本表单并返回管理器',
   valueEmpty: '（空）',
   valueEntries: '{{count}} 项',
   valueArgs: '{{count}} 个参数',
@@ -484,6 +548,8 @@ async function runManager(
   credentials: CredentialProviderFace,
   icons: IconSet,
 ): Promise<void> {
+  const collapsedSetIds = new Set<string>()
+  let setsCollapsed = false
   while (true) {
     const lang = await resolveTuiLanguage(ctx)
     let snapshot: McpManagerSnapshot
@@ -496,17 +562,42 @@ async function runManager(
 
     const connected = snapshot.servers.filter((server) => server.state === 'connected').length
     const toolCount = snapshot.servers.reduce((total, server) => total + server.tools.length, 0)
+    const activeSetNames = snapshot.sets.filter((set) => set.active).map((set) => setDisplayName(lang, set))
+    const activeSetName = activeSetNames.join(', ') || '-'
+    const treeOptions = snapshot.sets.flatMap((set) => {
+      const collapsed = collapsedSetIds.has(set.id)
+      const members = set.serverIds
+        .map((id) => snapshot.servers.find((server) => server.id === id))
+        .filter((server): server is McpServerView => server !== undefined)
+      return [
+        {
+          id: `set:${set.id}`,
+          label: `├─${PAD_CELL}${collapsed ? '▸' : '▾'}${PAD_CELL}${set.active ? icons.enable : icons.disable}${PAD_CELL}${setDisplayName(lang, set)}${PAD_CELL.repeat(2)}${members.length}`,
+        },
+        ...(collapsed ? [] : [
+          ...serverListOptions(lang, members, icons, `│${PAD_CELL.repeat(2)}`, `set-server:${set.id}:`, snapshot.servers, true),
+          {
+            id: `add-to-set:${set.id}`,
+            label: `│${PAD_CELL.repeat(2)}└─${PAD_CELL}${iconLabel(icons.add, copy(lang, 'addServerToSet'))}`,
+          },
+        ]),
+      ]
+    })
     const choice = await dialogs.select({
       title: copy(lang, 'managerTitle', {
         profile: snapshot.profile.key,
         connected,
         servers: snapshot.servers.length,
         tools: toolCount,
+        set: activeSetName,
       }),
       options: [
-        ...serverListOptions(lang, snapshot.servers, icons),
-        { id: 'add', label: iconLabel(icons.add, copy(lang, 'add')) },
         { id: 'refresh', label: iconLabel(icons.reconnect, copy(lang, 'refresh')) },
+        { id: 'sets', label: `${setsCollapsed ? '▸' : '▾'}${PAD_CELL}${copy(lang, 'sets')}${PAD_CELL.repeat(2)}${snapshot.sets.length}` },
+        ...(setsCollapsed ? [] : [
+          ...treeOptions,
+          { id: 'create-set', label: `└─${PAD_CELL}${iconLabel(icons.add, copy(lang, 'createSet'))}` },
+        ]),
       ],
       timeoutMs: DIALOG_TIMEOUT_MS,
     })
@@ -515,21 +606,360 @@ async function runManager(
 
     if (choice === 'refresh') continue
 
-    if (choice === 'add') {
-      const input = await askForServer(dialogs, lang, snapshot, credentials, icons)
-      if (!input) continue
-      try {
-        await persistCredentialValues(credentials, input.credentialValues)
-        await manager.invoke('upsert', { server: input.record })
-      } catch (error) {
-        await showError(dialogs, lang, icons, error)
+    if (choice === 'sets') {
+      setsCollapsed = !setsCollapsed
+      continue
+    }
+
+    if (choice === 'create-set') {
+      const set = await askForSet(dialogs, lang, snapshot, manager, credentials, icons)
+      if (set) {
+        try {
+          await manager.invoke('upsertSet', { set })
+        } catch (error) {
+          await showError(dialogs, lang, icons, error)
+        }
       }
       continue
     }
 
-    if (choice.startsWith('server:')) {
-      const serverId = choice.slice('server:'.length)
-      await runServerActions(ctx, dialogs, manager, credentials, icons, serverId)
+    if (choice.startsWith('set:')) {
+      const setId = choice.slice(4)
+      if (await runSetActions(ctx, dialogs, manager, credentials, icons, setId, collapsedSetIds.has(setId))) {
+        if (collapsedSetIds.has(setId)) collapsedSetIds.delete(setId)
+        else collapsedSetIds.add(setId)
+      }
+      continue
+    }
+
+    if (choice.startsWith('add-to-set:')) {
+      await runServerPoolForSet(ctx, dialogs, manager, credentials, icons, choice.slice('add-to-set:'.length))
+      continue
+    }
+
+    if (choice.startsWith('set-server:')) {
+      const [setId, serverId] = choice.slice('set-server:'.length).split(':')
+      if (setId && serverId) await runServerActions(ctx, dialogs, manager, credentials, icons, setId, serverId)
+    }
+  }
+}
+
+async function runServerPoolForSet(
+  ctx: any,
+  dialogs: TuiDialogs,
+  manager: McpManagerService,
+  credentials: CredentialProviderFace,
+  icons: IconSet,
+  setId: string,
+): Promise<void> {
+  const lang = await resolveTuiLanguage(ctx)
+  const snapshot = await manager.invoke('list', {})
+  const set = snapshot.sets.find((candidate) => candidate.id === setId)
+  if (!set) return
+  const result = await runDraftServerPool(
+    dialogs,
+    lang,
+    manager,
+    credentials,
+    icons,
+    snapshot,
+    setDisplayName(lang, set),
+    set.serverIds,
+  )
+  if (result.serverIds.join('\0') !== set.serverIds.join('\0')) {
+    try {
+      await manager.invoke('upsertSet', { set: { id: set.id, name: set.name, serverIds: result.serverIds } })
+    } catch (error) {
+      await showError(dialogs, lang, icons, error)
+    }
+  }
+}
+
+async function runDraftServerPool(
+  dialogs: TuiDialogs,
+  lang: UiLang,
+  manager: McpManagerService,
+  credentials: CredentialProviderFace,
+  icons: IconSet,
+  initialSnapshot: McpManagerSnapshot,
+  setName: string,
+  initialServerIds: readonly string[],
+): Promise<{ snapshot: McpManagerSnapshot; serverIds: string[] }> {
+  let snapshot = initialSnapshot
+  const serverIds = new Set(initialServerIds)
+  while (true) {
+    const members = new Set(serverIds)
+    const names = snapshot.servers.map((server) => truncateToCells(server.name, 18))
+    const ids = snapshot.servers.map((server) => truncateToCells(server.id, 18))
+    const namespaces = snapshot.servers.map((server) => truncateToCells(server.serverName, 18))
+    const transports = snapshot.servers.map((server) => server.transport)
+    const states = snapshot.servers.map((server) => runtimeStateText(lang, server.state))
+    const tools = snapshot.servers.map((server) => copy(lang, 'tools', { count: server.tools.length }))
+    const headers = [
+      copy(lang, 'setColumnName'),
+      copy(lang, 'setColumnId'),
+      copy(lang, 'setColumnNamespace'),
+      copy(lang, 'setColumnTransport'),
+      copy(lang, 'setColumnState'),
+      copy(lang, 'setColumnTools'),
+    ]
+    const columns = [names, ids, namespaces, transports, states, tools]
+    const widths = headers.map((header, index) => Math.max(
+      terminalCellWidth(header),
+      ...(columns[index] ?? []).map(terminalCellWidth),
+    ))
+    const choice = await dialogs.select({
+      title: copy(lang, 'setServerPoolTitle', { name: setName }),
+      options: [
+        { id: 'meta:header', label: `${PAD_CELL.repeat(2)}${columnRow(headers, widths)}` },
+        ...snapshot.servers.map((server, index) => ({
+          id: `pool-server:${server.id}`,
+          label: `${members.has(server.id) ? icons.enable : icons.add}${PAD_CELL}${columnRow(columns.map((column) => column[index] ?? ''), widths)}`,
+        })),
+        { id: 'new-server', label: iconLabel(icons.add, copy(lang, 'addNewServer')) },
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return { snapshot, serverIds: [...serverIds] }
+    try {
+      if (choice.startsWith('pool-server:')) {
+        const serverId = choice.slice('pool-server:'.length)
+        const server = snapshot.servers.find((candidate) => candidate.id === serverId)
+        if (!server) continue
+        const action = await dialogs.select({
+          title: copy(lang, 'serverActions', {
+            name: server.name,
+            tag: stateTag(server.state, icons),
+            transport: server.transport,
+            tools: copy(lang, 'tools', { count: server.tools.length }),
+          }),
+          options: [
+            {
+              id: 'membership',
+              label: iconLabel(
+                serverIds.has(serverId) ? icons.remove : icons.add,
+                copy(lang, serverIds.has(serverId) ? 'removeExistingFromSet' : 'addExistingToSet'),
+              ),
+            },
+            { id: 'delete', label: iconLabel(icons.remove, copy(lang, 'remove')) },
+            { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+          ],
+          timeoutMs: DIALOG_TIMEOUT_MS,
+        })
+        if (action === 'membership') {
+          if (serverIds.has(serverId)) serverIds.delete(serverId)
+          else serverIds.add(serverId)
+        }
+        if (action === 'delete') {
+          const confirmed = await dialogs.confirm({
+            title: copy(lang, 'confirmDelete'),
+            message: copy(lang, 'confirmDeleteMessage', { name: server.name }),
+            confirmLabel: iconLabel(icons.remove, copy(lang, 'confirmDeleteButton')),
+            cancelLabel: iconLabel(icons.cancel, copy(lang, 'cancel')),
+            timeoutMs: DIALOG_TIMEOUT_MS,
+          })
+          if (confirmed) {
+            snapshot = await manager.invoke('remove', { id: serverId })
+            serverIds.delete(serverId)
+          }
+        }
+        continue
+      }
+      if (choice === 'new-server') {
+        const input = await askForServer(dialogs, lang, snapshot, credentials, icons)
+        if (!input) continue
+        await persistCredentialValues(credentials, input.credentialValues)
+        snapshot = await manager.invoke('upsert', { server: input.record })
+        serverIds.add(input.record.id)
+      }
+    } catch (error) {
+      await showError(dialogs, lang, icons, error)
+    }
+  }
+}
+
+async function runSetActions(
+  ctx: any,
+  dialogs: TuiDialogs,
+  manager: McpManagerService,
+  credentials: CredentialProviderFace,
+  icons: IconSet,
+  setId: string,
+  collapsed: boolean,
+): Promise<boolean> {
+  while (true) {
+    const lang = await resolveTuiLanguage(ctx)
+    const snapshot = await manager.invoke('list', {})
+    const set = snapshot.sets.find((candidate) => candidate.id === setId)
+    if (!set) return false
+    const choice = await dialogs.select({
+      title: copy(lang, 'setActions', {
+        name: setDisplayName(lang, set),
+        count: set.serverIds.length,
+      }),
+      options: [
+        { id: 'toggle', label: iconLabel(set.active ? icons.disable : icons.enable, copy(lang, set.active ? 'deactivateSet' : 'activateSet')) },
+        { id: 'collapse', label: iconLabel(collapsed ? '▸' : '▾', copy(lang, collapsed ? 'expandSet' : 'collapseSet')) },
+        { id: 'edit', label: iconLabel(icons.edit, copy(lang, 'editSet')) },
+        { id: 'delete', label: iconLabel(icons.remove, copy(lang, 'deleteSet')) },
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return false
+    try {
+      if (choice === 'collapse') return true
+      if (choice === 'toggle') {
+        await manager.invoke('toggleSet', { id: set.id, enabled: !set.active })
+        continue
+      }
+      if (choice === 'edit') {
+        const updated = await askForSet(dialogs, lang, snapshot, manager, credentials, icons, set)
+        if (updated) await manager.invoke('upsertSet', { set: updated })
+        continue
+      }
+      if (choice === 'delete') {
+        const confirmed = await dialogs.confirm({
+          title: copy(lang, 'confirmDeleteSet'),
+          message: copy(lang, 'confirmDeleteSetMessage', { name: set.name }),
+          confirmLabel: copy(lang, 'deleteSet'),
+          cancelLabel: copy(lang, 'cancel'),
+          timeoutMs: DIALOG_TIMEOUT_MS,
+        })
+        if (confirmed) {
+          await manager.invoke('removeSet', { id: set.id })
+          return false
+        }
+      }
+    } catch (error) {
+      await showError(dialogs, lang, icons, error)
+    }
+  }
+}
+
+async function askForSet(
+  dialogs: TuiDialogs,
+  lang: UiLang,
+  snapshot: McpManagerSnapshot,
+  manager: McpManagerService,
+  credentials: CredentialProviderFace,
+  icons: IconSet,
+  existing?: McpSetView,
+): Promise<ManagedSetRecord | undefined> {
+  let currentSnapshot = snapshot
+  const mode = copy(lang, existing ? 'setEditMode' : 'setCreateMode')
+  const draft: ManagedSetRecord = {
+    id: existing?.id ?? nextSetId(snapshot),
+    name: existing?.name ?? '',
+    serverIds: [...(existing?.serverIds ?? [])],
+  }
+  while (true) {
+    const members = new Set(draft.serverIds)
+    const memberIndexes = currentSnapshot.servers
+      .map((server, index) => members.has(server.id) ? index : -1)
+      .filter((index) => index >= 0)
+    const memberNames = currentSnapshot.servers.map((server) => truncateToCells(server.name, 18))
+    const memberIds = currentSnapshot.servers.map((server) => truncateToCells(server.id, 18))
+    const memberNamespaces = currentSnapshot.servers.map((server) => truncateToCells(server.serverName, 18))
+    const memberTransports = currentSnapshot.servers.map((server) => server.transport)
+    const memberStates = currentSnapshot.servers.map((server) => runtimeStateText(lang, server.state))
+    const memberTools = currentSnapshot.servers.map((server) => copy(lang, 'tools', { count: server.tools.length }))
+    const memberHeaders = [
+      copy(lang, 'setColumnName'),
+      copy(lang, 'setColumnId'),
+      copy(lang, 'setColumnNamespace'),
+      copy(lang, 'setColumnTransport'),
+      copy(lang, 'setColumnState'),
+      copy(lang, 'setColumnTools'),
+    ]
+    const memberColumns = [
+      memberNames,
+      memberIds,
+      memberNamespaces,
+      memberTransports,
+      memberStates,
+      memberTools,
+    ]
+    const memberWidths = memberHeaders.map((header, index) => Math.max(
+      terminalCellWidth(header),
+      ...(memberColumns[index] ?? []).map(terminalCellWidth),
+    ))
+    const choice = await dialogs.select({
+      title: copy(lang, 'setFormTitle', { mode, id: draft.id }),
+      options: [
+        ...(!existing ? [{ id: 'id', label: `${icons.field} ${copy(lang, 'setId')}${dialogSpacer(copy(lang, 'setId'), 20)}${draft.id}` }] : []),
+        { id: 'name', label: `${icons.field} ${copy(lang, 'setName')}${dialogSpacer(copy(lang, 'setName'), 20)}${draft.name || copy(lang, 'valueEmpty')}` },
+        {
+          id: 'members',
+          label: `◆ ${copy(lang, 'setMembers')} ${draft.serverIds.length}/${currentSnapshot.servers.length}`,
+        },
+        { id: 'members-head', label: `${PAD_CELL.repeat(3)}${columnRow(memberHeaders, memberWidths)}` },
+        ...memberIndexes.map((index) => {
+          const server = currentSnapshot.servers[index]!
+          return {
+            id: `member:${server.id}`,
+            label: `├─${PAD_CELL}−${PAD_CELL}${columnRow(memberColumns.map((column) => column[index] ?? ''), memberWidths)}`,
+          }
+        }),
+        { id: 'add-member', label: `└─${PAD_CELL}${iconLabel(icons.add, copy(lang, 'setAddMember'))}` },
+        { id: 'save', label: iconLabel(icons.save, copy(lang, 'setSave')) },
+        { id: 'cancel', label: iconLabel(icons.cancel, copy(lang, 'setCancel')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'cancel') return undefined
+    if (choice === 'members' || choice.startsWith('members-')) continue
+    if (choice.startsWith('member:')) {
+      const id = choice.slice(7)
+      draft.serverIds = draft.serverIds.filter((candidate) => candidate !== id)
+      continue
+    }
+    if (choice === 'add-member') {
+      const result = await runDraftServerPool(
+        dialogs,
+        lang,
+        manager,
+        credentials,
+        icons,
+        currentSnapshot,
+        draft.name || draft.id,
+        draft.serverIds,
+      )
+      currentSnapshot = result.snapshot
+      draft.serverIds = result.serverIds
+      continue
+    }
+    if (choice === 'id') {
+      const value = await dialogs.input({
+        title: copy(lang, 'setIdPrompt'),
+        initial: draft.id,
+        placeholder: copy(lang, 'setIdPlaceholder'),
+        timeoutMs: DIALOG_TIMEOUT_MS,
+      })
+      if (value !== undefined) draft.id = value.trim()
+      continue
+    }
+    if (choice === 'name') {
+      const value = await dialogs.input({
+        title: copy(lang, 'setNamePrompt', { mode }),
+        initial: draft.name,
+        placeholder: copy(lang, 'setNamePlaceholder'),
+        timeoutMs: DIALOG_TIMEOUT_MS,
+      })
+      if (value !== undefined) draft.name = value.trim()
+      continue
+    }
+    if (choice === 'save') {
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(draft.id)) {
+        await showError(dialogs, lang, icons, new Error(copy(lang, 'invalidSetId')))
+        continue
+      }
+      if (draft.name.length === 0 || draft.name.length > 80) {
+        await showError(dialogs, lang, icons, new Error(copy(lang, 'invalidSetName')))
+        continue
+      }
+      return { ...draft, serverIds: [...draft.serverIds] }
     }
   }
 }
@@ -540,6 +970,7 @@ async function runServerActions(
   manager: McpManagerService,
   credentials: CredentialProviderFace,
   icons: IconSet,
+  setId: string,
   serverId: string,
 ): Promise<boolean> {
   while (true) {
@@ -553,6 +984,8 @@ async function runServerActions(
     }
     const server = snapshot.servers.find((item) => item.id === serverId)
     if (!server) return false
+    const currentSet = snapshot.sets.find((set) => set.id === setId)
+    if (!currentSet) return false
 
     const choice = await dialogs.select({
       title: copy(lang, 'serverActions', {
@@ -566,8 +999,8 @@ async function runServerActions(
         { id: 'doctor', label: iconLabel(icons.enable, copy(lang, 'doctor')) },
         { id: 'duplicate', label: iconLabel(icons.add, copy(lang, 'duplicate')) },
         {
-          id: 'toggle',
-          label: iconLabel(server.enabled ? icons.disable : icons.enable, copy(lang, server.enabled ? 'disable' : 'enable')),
+          id: 'remove-from-set',
+          label: iconLabel(icons.remove, copy(lang, 'removeExistingFromSet')),
         },
         ...(server.enabled
           ? [
@@ -578,7 +1011,6 @@ async function runServerActions(
             ]
           : []),
         { id: 'edit', label: iconLabel(icons.edit, copy(lang, 'edit')) },
-        { id: 'delete', label: iconLabel(icons.remove, copy(lang, 'remove')) },
         { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
       ],
       timeoutMs: DIALOG_TIMEOUT_MS,
@@ -600,12 +1032,25 @@ async function runServerActions(
         if (input) {
           await persistCredentialValues(credentials, input.credentialValues)
           await manager.invoke('upsert', { server: input.record })
+          await manager.invoke('upsertSet', {
+            set: {
+              id: currentSet.id,
+              name: currentSet.name,
+              serverIds: [...new Set([...currentSet.serverIds, input.record.id])],
+            },
+          })
           return true
         }
         continue
       }
-      if (choice === 'toggle') {
-        await manager.invoke('setEnabled', { id: serverId, enabled: !server.enabled })
+      if (choice === 'remove-from-set') {
+        await manager.invoke('upsertSet', {
+          set: {
+            id: currentSet.id,
+            name: currentSet.name,
+            serverIds: currentSet.serverIds.filter((id) => id !== serverId),
+          },
+        })
         return true
       }
       if (choice === 'reconnect') {
@@ -620,19 +1065,6 @@ async function runServerActions(
           return true
         }
         continue
-      }
-      if (choice === 'delete') {
-        const confirmed = await dialogs.confirm({
-          title: copy(lang, 'confirmDelete'),
-          message: copy(lang, 'confirmDeleteMessage', { name: server.name }),
-          confirmLabel: iconLabel(icons.remove, copy(lang, 'confirmDeleteButton')),
-          cancelLabel: iconLabel(icons.cancel, copy(lang, 'cancel')),
-          timeoutMs: DIALOG_TIMEOUT_MS,
-        })
-        if (confirmed) {
-          await manager.invoke('remove', { id: serverId })
-          return false
-        }
       }
     } catch (error) {
       await showError(dialogs, lang, icons, error)
@@ -700,17 +1132,21 @@ function doctorCheckValue(lang: UiLang, check: McpDoctorCheck): string {
   }
   if (check.id === 'tools') return copy(lang, 'tools', { count: check.detail.split(' ')[0] ?? '0' })
   if (check.id === 'runtime' && !check.detail.includes(':')) {
-    const runtime: Record<string, { zh: string; en: string }> = {
-      connected: { zh: '已连接', en: 'connected' },
-      starting: { zh: '正在启动', en: 'starting' },
-      reconnecting: { zh: '正在重连', en: 'reconnecting' },
-      failed: { zh: '连接失败', en: 'failed' },
-      stopped: { zh: '已停止', en: 'stopped' },
-      disabled: { zh: '已停用', en: 'disabled' },
-    }
-    return runtime[check.detail]?.[lang] ?? check.detail
+    return runtimeStateText(lang, check.detail as McpServerView['state'])
   }
   return check.detail
+}
+
+function runtimeStateText(lang: UiLang, state: McpServerView['state']): string {
+  const runtime: Record<McpServerView['state'], { zh: string; en: string }> = {
+    connected: { zh: '已连接', en: 'connected' },
+    starting: { zh: '正在启动', en: 'starting' },
+    reconnecting: { zh: '正在重连', en: 'reconnecting' },
+    failed: { zh: '连接失败', en: 'failed' },
+    stopped: { zh: '已停止', en: 'stopped' },
+    disabled: { zh: '已停用', en: 'disabled' },
+  }
+  return runtime[state]?.[lang] ?? state
 }
 
 function doctorSuggestion(lang: UiLang, suggestion: NonNullable<McpDoctorCheck['suggestion']>): string {
@@ -1229,12 +1665,6 @@ async function askForServer(
         (value) => { draft.failOnStartupError = value },
       ),
       booleanStep(
-        'enabled',
-        copy(lang, 'enabledPrompt', { mode }),
-        () => draft.enabled,
-        (value) => { draft.enabled = value },
-      ),
-      booleanStep(
         'reconnectEnabled',
         copy(lang, 'formReconnect'),
         () => draft.reconnect.enabled,
@@ -1285,7 +1715,6 @@ async function askForServer(
       secretHeaders: 'formSecretHeaders',
       toolCallTimeoutMs: 'formToolTimeout',
       failOnStartupError: 'formFailStartup',
-      enabled: 'formEnabled',
       reconnectEnabled: 'formReconnect',
       reconnectInitialDelayMs: 'formInitialDelay',
       reconnectMaxDelayMs: 'formMaxDelay',
@@ -1326,7 +1755,6 @@ async function askForServer(
       case 'secretHeaders': return count(draft.secretHeaders, 'valueEntries')
       case 'toolCallTimeoutMs': return copy(lang, 'valueMilliseconds', { value: draft.toolCallTimeoutMs })
       case 'failOnStartupError': return copy(lang, draft.failOnStartupError ? 'enabled' : 'disabled')
-      case 'enabled': return copy(lang, draft.enabled ? 'enabled' : 'disabled')
       case 'reconnectEnabled': return copy(lang, draft.reconnect.enabled ? 'enabled' : 'disabled')
       case 'reconnectInitialDelayMs': return copy(lang, 'valueMilliseconds', { value: draft.reconnect.initialDelayMs })
       case 'reconnectMaxDelayMs': return copy(lang, 'valueMilliseconds', { value: draft.reconnect.maxDelayMs })
@@ -1471,24 +1899,32 @@ async function showError(dialogs: TuiDialogs, lang: UiLang, icons: IconSet, erro
   })
 }
 
-function serverListOptions(lang: UiLang, servers: readonly McpServerView[], icons: IconSet) {
+function serverListOptions(
+  lang: UiLang,
+  servers: readonly McpServerView[],
+  icons: IconSet,
+  prefix = '',
+  idPrefix = 'server:',
+  alignmentServers: readonly McpServerView[] = servers,
+  hasFollowingSibling = false,
+) {
   const names = servers.map((server) => truncateToCells(server.name, 24))
   const toolCounts = servers.map((server) =>
     server.tools.length === 0 && (server.state === 'starting' || server.state === 'reconnecting')
       ? '...'
       : String(server.tools.length),
   )
-  const nameWidth = Math.max(0, ...names.map(terminalCellWidth))
-  const tagWidth = Math.max(0, ...servers.map((server) => terminalCellWidth(stateTag(server.state, icons))))
-  const toolCountWidth = Math.max(1, ...toolCounts.map(terminalCellWidth))
+  const nameWidth = Math.max(0, ...alignmentServers.map((server) => terminalCellWidth(truncateToCells(server.name, 24))))
+  const tagWidth = Math.max(0, ...alignmentServers.map((server) => terminalCellWidth(stateTag(server.state, icons))))
+  const toolCountWidth = Math.max(1, ...alignmentServers.map((server) => terminalCellWidth(String(server.tools.length))))
 
   return servers.map((server, index) => ({
-    id: `server:${server.id}`,
-    label: [
-      padToCells(names[index] ?? server.name, nameWidth),
-      padToCells(stateTag(server.state, icons), tagWidth),
-      copy(lang, 'tools', { count: (toolCounts[index] ?? '0').padStart(toolCountWidth, PAD_CELL) }),
-    ].join(PAD_CELL.repeat(2)),
+    id: `${idPrefix}${server.id}`,
+    label: `${prefix}${index === servers.length - 1 && !hasFollowingSibling ? '└─' : '├─'}${PAD_CELL}${[
+        padToCells(names[index] ?? server.name, nameWidth),
+        padToCells(stateTag(server.state, icons), tagWidth),
+        copy(lang, 'tools', { count: (toolCounts[index] ?? '0').padStart(toolCountWidth, PAD_CELL) }),
+      ].join(PAD_CELL.repeat(2))}`,
   }))
 }
 
@@ -1496,10 +1932,18 @@ function stateTag(state: McpServerView['state'], icons: IconSet): string {
   return icons.states[state]
 }
 
+function setDisplayName(lang: UiLang, set: McpSetView): string {
+  return set.id === 'default' && set.name === 'Default' ? copy(lang, 'noActiveSet') : set.name
+}
+
 // The managed-dialog sanitizer collapses every Unicode whitespace run. U+2800
 // is a single-cell blank glyph rather than whitespace, so table padding
 // survives the public dialog boundary and keeps terminal columns aligned.
 const PAD_CELL = '\u2800'
+
+function dialogSpacer(text: string, targetWidth: number): string {
+  return PAD_CELL.repeat(Math.max(2, targetWidth - terminalCellWidth(text)))
+}
 
 function terminalCellWidth(text: string): number {
   let width = 0
@@ -1509,6 +1953,10 @@ function terminalCellWidth(text: string): number {
 
 function padToCells(text: string, width: number): string {
   return text + PAD_CELL.repeat(Math.max(0, width - terminalCellWidth(text)))
+}
+
+function columnRow(cells: readonly string[], widths: readonly number[]): string {
+  return cells.map((cell, index) => padToCells(cell, widths[index] ?? terminalCellWidth(cell))).join(PAD_CELL.repeat(2))
 }
 
 function truncateToCells(text: string, maxWidth: number): string {
@@ -1564,6 +2012,14 @@ function nextServerId(snapshot: McpManagerSnapshot): string {
   let index = 1
   while (existing.has(`mcp-${index}`)) index += 1
   return `mcp-${index}`
+}
+
+function nextSetId(snapshot: McpManagerSnapshot): string {
+  const existing = new Set(snapshot.sets.map((set) => set.id))
+  for (let index = 1; ; index += 1) {
+    const candidate = `set-${index}`
+    if (!existing.has(candidate)) return candidate
+  }
 }
 
 function nextDuplicateId(snapshot: McpManagerSnapshot, source: string): string {

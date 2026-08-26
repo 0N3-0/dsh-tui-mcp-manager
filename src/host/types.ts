@@ -48,6 +48,17 @@ export interface ManagedServerRecord {
   reconnect?: ReconnectConfig
 }
 
+/** A named collection of server identities; server configuration is never copied. */
+export interface ManagedSetRecord {
+  id: string
+  name: string
+  serverIds: string[]
+}
+
+export interface McpSetView extends ManagedSetRecord {
+  active: boolean
+}
+
 export type ServerRuntimeState =
   | 'disabled'
   | 'starting'
@@ -111,6 +122,8 @@ export interface McpManagerSnapshot {
     managedBlock: boolean
   }
   servers: McpServerView[]
+  sets: McpSetView[]
+  activeSetIds: string[]
 }
 
 export type McpDoctorState = 'pass' | 'warn' | 'fail'

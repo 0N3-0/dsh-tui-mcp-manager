@@ -13,10 +13,12 @@ import {
 } from './schema.js'
 import { detectProfile, type ProfileIdentity } from './profile.js'
 import { loaderRowId, ProfilePatchStore, toLoaderEntry, type PatchStoreSnapshot } from './patch-store.js'
+import { applyActiveSetsToServers, normalizeSetRecord, ProfileSetStore, type SetStoreSnapshot } from './set-store.js'
 import {
   ManagerError,
   type CredentialStateView,
   type ManagedServerRecord,
+  type ManagedSetRecord,
   type McpDoctorCheck,
   type McpDoctorReport,
   type McpManagerSnapshot,
@@ -84,6 +86,7 @@ export class McpManagerService extends Service {
 
   private readonly profile: ProfileIdentity
   private readonly store?: ProfilePatchStore
+  private readonly setStore?: ProfileSetStore
   private legacySettings?: SettingsScope<unknown>
   private readonly records = new Map<string, RuntimeRecord>()
   private revision = 0
@@ -94,6 +97,7 @@ export class McpManagerService extends Service {
     super(ctx, 'mcpManager')
     this.profile = detectProfile(ctx)
     this.store = this.profile.patchPath === undefined ? undefined : new ProfilePatchStore(this.profile.patchPath)
+    this.setStore = this.profile.dir === undefined ? undefined : new ProfileSetStore(join(this.profile.dir, 'mcp-manager.sets.yml'))
     this.installLegacySettingsMigration()
     this.installToolRegistryTracking()
     this.installPatchFailureTracking()
@@ -217,6 +221,36 @@ export class McpManagerService extends Service {
     this.assertNoExternalNamespaceConflict(servers)
     const snapshot = await this.requireStore().write(servers)
     this.lastStorage = snapshot
+    return snapshot
+  }
+
+  private async readSets(serverIds?: Set<string>, activateInitialDefault = false): Promise<SetStoreSnapshot> {
+    if (this.setStore === undefined) return { sets: [], activeSetIds: [], initialized: true, writable: false, path: '' }
+    let snapshot = await this.setStore.read()
+    if (!snapshot.initialized && serverIds !== undefined) {
+      const sets = [...snapshot.sets]
+      let defaultId = 'default'
+      for (let index = 1; sets.some((set) => set.id === defaultId); index += 1) defaultId = `default-${index}`
+      sets.push({ id: defaultId, name: 'Default', serverIds: [...serverIds] })
+      const activeSetIds = activateInitialDefault ? [...snapshot.activeSetIds, defaultId] : snapshot.activeSetIds
+      snapshot = await this.setStore.write(sets, activeSetIds)
+    }
+    if (serverIds !== undefined) {
+      snapshot.sets = snapshot.sets.map((set) => ({
+        ...set,
+        serverIds: set.serverIds.filter((id) => serverIds.has(id)),
+      }))
+    }
+    return snapshot
+  }
+
+  private async writeSets(
+    sets: ManagedSetRecord[],
+    activeSetIds: string[] = [],
+  ): Promise<SetStoreSnapshot> {
+    if (this.setStore === undefined) throw new ManagerError('active profile path is unavailable', { code: 'profile-unavailable' })
+    const snapshot = await this.setStore.write(sets, activeSetIds)
+    this.revision += 1
     return snapshot
   }
 
@@ -464,6 +498,68 @@ export class McpManagerService extends Service {
       case 'list':
         await this.enqueue(() => this.syncFromFile())
         return this.snapshot()
+      case 'upsertSet': {
+        const set = normalizeSetRecord(asPayload(payload).set)
+        await this.enqueue(async () => {
+          const storage = await this.readStorage()
+          const known = new Set(storage.servers.map((server) => server.id))
+          const unknown = set.serverIds.filter((id) => !known.has(id))
+          if (unknown.length > 0) throw new ManagerError(`set references unknown server(s): ${unknown.join(', ')}`, { code: 'not-found' })
+          const sets = await this.readSets(known)
+          const duplicateName = sets.sets.find((candidate) =>
+            candidate.id !== set.id && candidate.name.toLocaleLowerCase() === set.name.toLocaleLowerCase(),
+          )
+          if (duplicateName !== undefined) {
+            throw new ManagerError(`set name ${JSON.stringify(set.name)} is already used by ${JSON.stringify(duplicateName.id)}`, { code: 'duplicate-set-name' })
+          }
+          const index = sets.sets.findIndex((candidate) => candidate.id === set.id)
+          if (index === -1) sets.sets.push(set)
+          else sets.sets[index] = set
+          const servers = applyActiveSetsToServers(storage.servers, sets.sets, sets.activeSetIds)
+          const written = await this.writeServers(servers)
+          await this.writeSets(sets.sets, sets.activeSetIds)
+          await this.syncFromFile(written)
+        })
+        return this.snapshot()
+      }
+      case 'removeSet': {
+        const id = stringField(payload, 'id')
+        await this.enqueue(async () => {
+          const storage = await this.readStorage()
+          const sets = await this.readSets()
+          if (!sets.sets.some((set) => set.id === id)) throw new ManagerError(`set ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+          const remainingSets = sets.sets.filter((set) => set.id !== id)
+          const activeSetIds = sets.activeSetIds.filter((candidate) => candidate !== id)
+          const servers = applyActiveSetsToServers(storage.servers, remainingSets, activeSetIds)
+          const written = await this.writeServers(servers)
+          await this.writeSets(remainingSets, activeSetIds)
+          await this.syncFromFile(written)
+        })
+        return this.snapshot()
+      }
+      case 'toggleSet': {
+        const id = stringField(payload, 'id')
+        await this.enqueue(async () => {
+          const storage = await this.readStorage()
+          const known = new Set(storage.servers.map((server) => server.id))
+          const sets = await this.readSets(known)
+          const set = sets.sets.find((candidate) => candidate.id === id)
+          if (set === undefined) throw new ManagerError(`set ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+          const requested = asPayload(payload).enabled
+          if (requested !== undefined && typeof requested !== 'boolean') {
+            throw new ManagerError('enabled must be a boolean', { code: 'invalid-payload' })
+          }
+          const active = new Set(sets.activeSetIds)
+          const enabled = typeof requested === 'boolean' ? requested : !active.has(id)
+          if (enabled) active.add(id)
+          else active.delete(id)
+          const servers = applyActiveSetsToServers(storage.servers, sets.sets, [...active])
+          const written = await this.writeServers(servers)
+          await this.writeSets(sets.sets, [...active])
+          await this.syncFromFile(written)
+        })
+        return this.snapshot()
+      }
       case 'upsert': {
         const record = normalizeServerRecord(asRecord(payload, 'server'))
         await this.enqueue(async () => {
@@ -479,7 +575,9 @@ export class McpManagerService extends Service {
           const index = servers.findIndex((candidate) => candidate.id === record.id)
           if (index === -1) servers.push(record)
           else servers[index] = record
-          const written = await this.writeServers(servers)
+          const sets = await this.readSets(new Set(servers.map((server) => server.id)))
+          const normalizedServers = applyActiveSetsToServers(servers, sets.sets, sets.activeSetIds)
+          const written = await this.writeServers(normalizedServers)
           await this.syncFromFile(written)
         })
         return this.snapshot()
@@ -489,27 +587,10 @@ export class McpManagerService extends Service {
         await this.enqueue(async () => {
           const storage = await this.readStorage()
           const written = await this.writeServers(storage.servers.filter((server) => server.id !== id))
+          const sets = await this.readSets(new Set(written.servers.map((server) => server.id)))
+          await this.writeSets(sets.sets, sets.activeSetIds)
           await this.syncFromFile(written)
         })
-        return this.snapshot()
-      }
-      case 'setEnabled':
-      case 'setDefaultEnabled': {
-        const id = stringField(payload, 'id')
-        const enabled = booleanField(payload, 'enabled')
-        await this.enqueue(() => this.persistEnabled(id, enabled))
-        return this.snapshot()
-      }
-      case 'setRuntimeOverride': {
-        // Compatibility with a previously loaded client: file-backed mode has
-        // one persisted Loader switch, so a boolean becomes `enabled`.
-        const id = stringField(payload, 'id')
-        const { override } = asPayload(payload)
-        if (override !== null && typeof override !== 'boolean') {
-          throw new ManagerError('override must be true, false, or null.', { code: 'invalid-payload' })
-        }
-        if (typeof override === 'boolean') await this.enqueue(() => this.persistEnabled(id, override))
-        else await this.enqueue(() => this.syncFromFile())
         return this.snapshot()
       }
       case 'reconnect': {
@@ -520,15 +601,6 @@ export class McpManagerService extends Service {
       default:
         throw new ManagerError(`unknown mcp-manager endpoint ${JSON.stringify(endpoint)}`, { code: 'unknown-endpoint' })
     }
-  }
-
-  private async persistEnabled(id: string, enabled: boolean): Promise<void> {
-    const storage = await this.readStorage()
-    const server = storage.servers.find((candidate) => candidate.id === id)
-    if (server === undefined) throw new ManagerError(`server ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
-    server.enabled = enabled
-    const written = await this.writeServers(storage.servers)
-    await this.syncFromFile(written)
   }
 
   private async reconnectServer(id: string): Promise<void> {
@@ -643,6 +715,17 @@ export class McpManagerService extends Service {
 
   private async snapshot(): Promise<McpManagerSnapshot> {
     const storage = this.lastStorage
+    const serverIds = new Set(storage?.servers.map((server) => server.id) ?? [])
+    const setStorage = await this.readSets(
+      serverIds,
+      (storage?.servers.length ?? 0) === 0 || storage!.servers.every((server) => server.enabled),
+    )
+    const sets = setStorage.sets.map((set) => ({
+      ...set,
+      serverIds: [...set.serverIds],
+      active: setStorage.activeSetIds.includes(set.id),
+    }))
+    const activeSetIds = sets.filter((set) => set.active).map((set) => set.id)
     return {
       revision: this.revision,
       profile: { key: this.profile.key, source: this.profile.source },
@@ -653,6 +736,8 @@ export class McpManagerService extends Service {
         managedBlock: storage?.hasManagedBlock ?? false,
       },
       servers: await Promise.all([...this.records.values()].map((record) => this.viewFor(record))),
+      sets,
+      activeSetIds,
     }
   }
 }
@@ -712,14 +797,6 @@ function stringField(payload: unknown, field: string): string {
   const value = asPayload(payload)[field]
   if (typeof value !== 'string' || value === '') {
     throw new ManagerError(`${field} must be a non-empty string.`, { code: 'invalid-payload' })
-  }
-  return value
-}
-
-function booleanField(payload: unknown, field: string): boolean {
-  const value = asPayload(payload)[field]
-  if (typeof value !== 'boolean') {
-    throw new ManagerError(`${field} must be a boolean.`, { code: 'invalid-payload' })
   }
   return value
 }

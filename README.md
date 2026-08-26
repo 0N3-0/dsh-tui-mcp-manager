@@ -7,6 +7,8 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 
 - 浮窗即时显示服务器状态；连接中的工具数显示为 `...`，可用 `↻ 刷新` 获取最新数量。
 - 添加、复制、编辑、启停、重连和删除 MCP server；复制会生成新的 ID 与工具命名空间，默认保持禁用，并在完整表单确认后写入。
+- MCP Sets 将多个已有服务器 ID 保存为集合；所有 Set 在树中独立启停，实际启用状态取活动 Set 的成员并集。重复成员仍只对应一个 Loader row，因此只启动一次；切换通过一次 `cordis.patch.yml` 批量写入完成。
+- Set 树和各 Set 成员均可折叠；每个 Set 自带服务器池入口，可切换已有服务器成员、创建全新 MCP，或全局删除服务器并自动清理所有 Set 引用。
 - Inspector 可查看服务器概览、已注册工具、参数 schema 和最近的明确运行错误。
 - Doctor Lite 在一个浮窗中直接显示 Loader/Fiber、可执行文件或 URL、工作目录、凭据、现有运行时和工具数；失败项附带针对性的修复建议。重测复用 Loader/HMR，不会额外建立 MCP 连接。
 - 完整配置 stdio 与 streamable-http transport。
@@ -36,6 +38,8 @@ dsh --profile dsh-tui
 /mcp-manager
 ```
 
+服务器与 Sets 都从这个浮窗入口管理，不额外暴露子命令参数。
+
 语言由 dsh-TUI 统一管理：
 
 ```text
@@ -55,6 +59,12 @@ $DSH_HOME/profiles/dsh-tui/cordis.patch.yml
 Cordis Loader / HMR
     -> @deepseek-ai/dsh-mcp-client
 ```
+
+服务器配置仍以 `cordis.patch.yml` 为唯一事实源；Set 定义单独保存在当前 profile 的
+`mcp-manager.sets.yml`，只引用服务器 ID，不复制命令、endpoint 或凭据。Set 文件与服务器 patch
+都使用同目录临时文件、fsync 和原子 rename。插件持久化多个活动 Set，启停节点时先计算所有活动
+Set 的成员并集，再对服务器 patch 执行一次批量写入，不会循环调用单服务器启停。首次没有集合
+时会自动创建一个包含当时全部 MCP 的“默认”集合；它保存后就是普通 Set，可以照常启停和编辑。
 
 插件只修改下面的兼容 marker block，marker 外的 patch、注释和 `!!js` 表达式保持原样：
 
@@ -158,6 +168,7 @@ cordis.patch.yml        单一 Cordis Loader row
 src/index.ts            精简的 Cordis 公共契约
 src/plugin.ts           运行时组合与生命周期入口
 src/host/               patch store、状态投影和配置 schema
+src/host/set-store.ts   profile-local Set 定义与原子文件写入
 src/server/             credential-aware MCP client 适配器
 src/tui/                dsh-TUI 浮窗和表单
 scripts/verify.mjs      manifest 与 Cordis 入口契约检查

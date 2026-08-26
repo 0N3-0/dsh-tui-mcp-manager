@@ -12,6 +12,7 @@ export declare class McpManagerService extends Service {
     static inject: string[];
     private readonly profile;
     private readonly store?;
+    private readonly setStore?;
     private legacySettings?;
     private readonly records;
     private revision;
@@ -28,6 +29,8 @@ export declare class McpManagerService extends Service {
     private legacyServers;
     private readStorage;
     private writeServers;
+    private readSets;
+    private writeSets;
     private loaderEntries;
     private loaderEntry;
     private assertNoExternalNamespaceConflict;
@@ -44,7 +47,6 @@ export declare class McpManagerService extends Service {
      */
     doctor(id: string): Promise<McpDoctorReport>;
     private dispatchRpc;
-    private persistEnabled;
     private reconnectServer;
     private credentialState;
     private resolvedSecrets;
