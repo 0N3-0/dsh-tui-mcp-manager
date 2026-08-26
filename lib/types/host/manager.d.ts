@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis';
-import { type McpManagerSnapshot } from './types.js';
+import { type McpDoctorReport, type McpManagerSnapshot } from './types.js';
 /**
  * File-backed MCP manager.
  *
@@ -20,9 +20,7 @@ export declare class McpManagerService extends Service {
     constructor(ctx: Context);
     /** Register the old section read-only so an existing install can migrate once. */
     private installLegacySettingsMigration;
-    private installLogCapture;
     private installToolRegistryTracking;
-    private installCredentialTracking;
     private installPatchFailureTracking;
     private installRpcChannel;
     private enqueue;
@@ -39,14 +37,17 @@ export declare class McpManagerService extends Service {
     private toolsFor;
     /** Reconcile the cached view with the native registry without inventing a state transition. */
     private refreshTools;
-    private applyLogTransition;
     invoke(endpoint: string, payload: unknown): Promise<McpManagerSnapshot>;
+    /**
+     * Diagnose one server without opening another MCP transport. Runtime checks
+     * are projections of the Loader-owned client already running in this host.
+     */
+    doctor(id: string): Promise<McpDoctorReport>;
     private dispatchRpc;
     private persistEnabled;
     private reconnectServer;
     private credentialState;
     private resolvedSecrets;
-    private refreshRedactionTokens;
     private redact;
     private viewFor;
     private snapshot;

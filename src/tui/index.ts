@@ -9,8 +9,10 @@ import type { TuiPluginHost } from '@deepseek-harness-tui/dsh-tui/plugin-host'
 import type { McpManagerService } from '../host/manager.js'
 import type {
   ManagedServerRecord,
+  McpDoctorCheck,
   McpManagerSnapshot,
   McpServerView,
+  McpToolView,
   SecretHeaderRef,
 } from '../host/types.js'
 
@@ -86,6 +88,45 @@ const EN = {
   enable: 'Enable',
   disable: 'Disable',
   reconnect: 'Reconnect',
+  inspect: 'Inspect',
+  doctor: 'Doctor',
+  doctorTitle: '{{name}} | Doctor {{state}}',
+  doctorStorage: 'Profile storage',
+  doctorLoader: 'Loader row',
+  doctorTarget: 'Connection target',
+  doctorCwd: 'Working directory',
+  doctorCredentials: 'Credential references',
+  doctorRuntime: 'Existing runtime',
+  doctorTools: 'Tool registry',
+  runAgain: 'Run checks again',
+  reconnectAndCheck: 'Reconnect and check again',
+  suggestFixPermissions: 'Fix profile file permissions, then refresh.',
+  suggestReloadProfile: 'Refresh first; if it remains unapplied, inspect cordis.patch.yml or restart this profile.',
+  suggestEditCommand: 'Edit the command or use an executable absolute path.',
+  suggestEditUrl: 'Edit the endpoint and use an http:// or https:// URL.',
+  suggestEditCwd: 'Edit the working directory or leave it empty.',
+  suggestSetCredentials: 'Edit this server and configure each missing credential value.',
+  suggestCheckAuth: 'Check the credential reference, header name and required prefix.',
+  suggestCheckNetwork: 'Check endpoint reachability, DNS, proxy and timeout settings.',
+  suggestReconnectRuntime: 'Reconnect this server; if it still fails, inspect the host terminal output.',
+  suggestWaitRuntime: 'Wait for startup to settle, then run checks again; reconnect if it does not.',
+  overview: 'Overview',
+  toolList: 'Tools and schema',
+  latestError: 'Latest error',
+  noError: 'No runtime error',
+  noTools: 'This server currently exposes no tools.',
+  toolTitle: '{{name}} | {{count}} parameters',
+  required: 'required',
+  optional: 'optional',
+  schema: 'Schema',
+  description: 'Description',
+  configTransport: 'Transport',
+  configTarget: 'Target',
+  configState: 'Runtime state',
+  configUpdated: 'Last update',
+  configCredentials: 'Credentials',
+  configReconnect: 'Auto reconnect',
+  configTimeout: 'Tool timeout',
   edit: 'Edit',
   remove: 'Delete',
   back: 'Back',
@@ -186,6 +227,45 @@ const ZH: Record<CopyKey, string> = {
   enable: '启用',
   disable: '停用',
   reconnect: '重新连接',
+  inspect: '检查详情',
+  doctor: '诊断',
+  doctorTitle: '{{name}} | 诊断 {{state}}',
+  doctorStorage: 'Profile 存储',
+  doctorLoader: 'Loader 配置行',
+  doctorTarget: '连接目标',
+  doctorCwd: '工作目录',
+  doctorCredentials: '凭据引用',
+  doctorRuntime: '现有运行时',
+  doctorTools: '工具注册表',
+  runAgain: '重新检查',
+  reconnectAndCheck: '重连并重新检查',
+  suggestFixPermissions: '修复 profile 文件权限后刷新。',
+  suggestReloadProfile: '先刷新；如果仍未应用，请检查 cordis.patch.yml 或重启当前 profile。',
+  suggestEditCommand: '编辑命令，或改用可执行文件的绝对路径。',
+  suggestEditUrl: '编辑 endpoint，并使用 http:// 或 https:// URL。',
+  suggestEditCwd: '编辑工作目录，或将其留空。',
+  suggestSetCredentials: '编辑服务器，为每个缺失的凭据引用填写实际值。',
+  suggestCheckAuth: '检查凭据引用、请求头名称以及服务要求的前缀。',
+  suggestCheckNetwork: '检查 endpoint 连通性、DNS、代理和超时配置。',
+  suggestReconnectRuntime: '重新连接此服务器；如果仍然失败，请查看宿主终端输出。',
+  suggestWaitRuntime: '等待启动完成后重新检查；长时间无变化时执行重连。',
+  overview: '概览',
+  toolList: '工具与 Schema',
+  latestError: '最近错误',
+  noError: '当前没有运行时错误',
+  noTools: '此服务器当前没有暴露工具。',
+  toolTitle: '{{name}} | {{count}} 个参数',
+  required: '必填',
+  optional: '可选',
+  schema: 'Schema',
+  description: '说明',
+  configTransport: '传输方式',
+  configTarget: '连接目标',
+  configState: '运行状态',
+  configUpdated: '最后更新',
+  configCredentials: '凭据',
+  configReconnect: '自动重连',
+  configTimeout: '工具超时',
   edit: '编辑',
   remove: '删除',
   back: '返回',
@@ -478,6 +558,8 @@ async function runServerActions(
         tools: copy(lang, 'tools', { count: server.tools.length }),
       }),
       options: [
+        { id: 'inspect', label: iconLabel(icons.field, copy(lang, 'inspect')) },
+        { id: 'doctor', label: iconLabel(icons.enable, copy(lang, 'doctor')) },
         {
           id: 'toggle',
           label: iconLabel(server.enabled ? icons.disable : icons.enable, copy(lang, server.enabled ? 'disable' : 'enable')),
@@ -500,6 +582,14 @@ async function runServerActions(
     if (!choice || choice === 'back') return false
 
     try {
+      if (choice === 'inspect') {
+        await runInspector(ctx, dialogs, manager, icons, serverId)
+        continue
+      }
+      if (choice === 'doctor') {
+        await runDoctor(ctx, dialogs, manager, icons, serverId)
+        continue
+      }
       if (choice === 'toggle') {
         await manager.invoke('setEnabled', { id: serverId, enabled: !server.enabled })
         return true
@@ -533,6 +623,333 @@ async function runServerActions(
     } catch (error) {
       await showError(dialogs, lang, icons, error)
     }
+  }
+}
+
+async function runDoctor(
+  ctx: any,
+  dialogs: TuiDialogs,
+  manager: McpManagerService,
+  icons: IconSet,
+  serverId: string,
+): Promise<void> {
+  while (true) {
+    const lang = await resolveTuiLanguage(ctx)
+    let server: McpServerView | undefined
+    let report: Awaited<ReturnType<McpManagerService['doctor']>>
+    try {
+      const snapshot = await manager.invoke('list', {})
+      server = snapshot.servers.find((item) => item.id === serverId)
+      if (!server) return
+      report = await manager.doctor(serverId)
+    } catch (error) {
+      await showError(dialogs, lang, icons, error)
+      return
+    }
+    const checkWidth = Math.max(...report.checks.map((check) => terminalCellWidth(doctorCheckLabel(lang, check.id))))
+    const choice = await dialogs.select({
+      title: copy(lang, 'doctorTitle', { name: server.name, state: doctorStateIcon(report.state, icons) }),
+      options: [
+        ...report.checks.map((check, index) => ({
+          id: `check:${index}`,
+          label: `${doctorStateIcon(check.state, icons)} ${padToCells(doctorCheckLabel(lang, check.id), checkWidth)}${PAD_CELL.repeat(2)}${truncateToCells(doctorCheckValue(lang, check), 74)}`,
+          ...(check.suggestion ? { description: doctorSuggestion(lang, check.suggestion) } : {}),
+        })),
+        { id: 'again', label: iconLabel(icons.reconnect, copy(lang, 'runAgain')) },
+        ...(server.enabled
+          ? [{ id: 'reconnect', label: iconLabel(icons.reconnect, copy(lang, 'reconnectAndCheck')) }]
+          : []),
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return
+    if (choice === 'again') continue
+    if (choice === 'reconnect') {
+      try {
+        await manager.invoke('reconnect', { id: serverId })
+      } catch (error) {
+        await showError(dialogs, lang, icons, error)
+      }
+      continue
+    }
+    // Result rows are intentionally non-navigating: the complete report and
+    // any actionable suggestion stay visible in this one dialog.
+  }
+}
+
+function doctorCheckValue(lang: UiLang, check: McpDoctorCheck): string {
+  if (check.id === 'loader' && check.state === 'pass') {
+    return lang === 'zh'
+      ? check.detail.replace('applied', '已应用').replace('Fiber active', 'Fiber 已激活').replace('Fiber is not active yet', 'Fiber 尚未激活')
+      : check.detail
+  }
+  if (check.id === 'tools') return copy(lang, 'tools', { count: check.detail.split(' ')[0] ?? '0' })
+  if (check.id === 'runtime' && !check.detail.includes(':')) {
+    const runtime: Record<string, { zh: string; en: string }> = {
+      connected: { zh: '已连接', en: 'connected' },
+      starting: { zh: '正在启动', en: 'starting' },
+      reconnecting: { zh: '正在重连', en: 'reconnecting' },
+      failed: { zh: '连接失败', en: 'failed' },
+      stopped: { zh: '已停止', en: 'stopped' },
+      disabled: { zh: '已停用', en: 'disabled' },
+    }
+    return runtime[check.detail]?.[lang] ?? check.detail
+  }
+  return check.detail
+}
+
+function doctorSuggestion(lang: UiLang, suggestion: NonNullable<McpDoctorCheck['suggestion']>): string {
+  const keys: Record<NonNullable<McpDoctorCheck['suggestion']>, CopyKey> = {
+    'fix-permissions': 'suggestFixPermissions',
+    'reload-profile': 'suggestReloadProfile',
+    'edit-command': 'suggestEditCommand',
+    'edit-url': 'suggestEditUrl',
+    'edit-cwd': 'suggestEditCwd',
+    'set-credentials': 'suggestSetCredentials',
+    'check-auth': 'suggestCheckAuth',
+    'check-network': 'suggestCheckNetwork',
+    'reconnect-runtime': 'suggestReconnectRuntime',
+    'wait-runtime': 'suggestWaitRuntime',
+  }
+  return copy(lang, keys[suggestion])
+}
+
+function doctorStateIcon(state: 'pass' | 'warn' | 'fail', icons: IconSet): string {
+  if (state === 'pass') return icons.enable
+  if (state === 'warn') return icons.reconnect
+  return icons.remove
+}
+
+function doctorCheckLabel(lang: UiLang, id: string): string {
+  const keys: Record<string, CopyKey> = {
+    storage: 'doctorStorage',
+    loader: 'doctorLoader',
+    target: 'doctorTarget',
+    cwd: 'doctorCwd',
+    credentials: 'doctorCredentials',
+    runtime: 'doctorRuntime',
+    tools: 'doctorTools',
+  }
+  const key = keys[id]
+  return key ? copy(lang, key) : id
+}
+
+async function runInspector(
+  ctx: any,
+  dialogs: TuiDialogs,
+  manager: McpManagerService,
+  icons: IconSet,
+  serverId: string,
+): Promise<void> {
+  while (true) {
+    const lang = await resolveTuiLanguage(ctx)
+    let server: McpServerView | undefined
+    try {
+      server = (await manager.invoke('list', {})).servers.find((item) => item.id === serverId)
+    } catch (error) {
+      await showError(dialogs, lang, icons, error)
+      return
+    }
+    if (!server) return
+
+    const choice = await dialogs.select({
+      title: copy(lang, 'serverActions', {
+        name: server.name,
+        tag: stateTag(server.state, icons),
+        transport: server.transport,
+        tools: copy(lang, 'tools', { count: server.tools.length }),
+      }),
+      options: [
+        { id: 'overview', label: iconLabel(icons.field, copy(lang, 'overview')) },
+        { id: 'tools', label: iconLabel(icons.edit, copy(lang, 'toolList')) },
+        ...(server.error ? [{ id: 'error', label: iconLabel(icons.remove, copy(lang, 'latestError')) }] : []),
+        { id: 'refresh', label: iconLabel(icons.reconnect, copy(lang, 'refresh')) },
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return
+    if (choice === 'overview') await showServerOverview(dialogs, lang, icons, server)
+    if (choice === 'tools') await runToolInspector(dialogs, lang, icons, server)
+    if (choice === 'error') {
+      await showDetail(dialogs, copy(lang, 'latestError'), server.error ?? copy(lang, 'noError'), lang, icons)
+    }
+  }
+}
+
+async function showServerOverview(
+  dialogs: TuiDialogs,
+  lang: UiLang,
+  icons: IconSet,
+  server: McpServerView,
+): Promise<void> {
+  const credentials = [
+    ...Object.values(server.secretEnv ?? {}).map((entry) => entry.credential),
+    ...Object.values(server.secretHeaders ?? {}).map((entry) => entry.credential),
+  ]
+  const configured = credentials.filter((item) => item.configured).length
+  const target = server.transport === 'stdio'
+    ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
+    : (server.url ?? '')
+  const rows = [
+    [copy(lang, 'configState'), `${stateTag(server.state, icons)} ${server.state}`],
+    [copy(lang, 'configTransport'), server.transport],
+    [copy(lang, 'configTarget'), target || copy(lang, 'valueEmpty')],
+    [copy(lang, 'configUpdated'), new Date(server.updatedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')],
+    [copy(lang, 'configCredentials'), `${configured}/${credentials.length}`],
+    [copy(lang, 'configReconnect'), server.reconnect?.enabled === false ? copy(lang, 'disabled') : copy(lang, 'enabled')],
+    [copy(lang, 'configTimeout'), copy(lang, 'valueMilliseconds', { value: server.toolCallTimeoutMs ?? 60_000 })],
+  ] as const
+  await runReadOnlyRows(dialogs, server.name, rows, lang, icons)
+}
+
+async function runToolInspector(
+  dialogs: TuiDialogs,
+  lang: UiLang,
+  icons: IconSet,
+  server: McpServerView,
+): Promise<void> {
+  if (server.tools.length === 0) {
+    await showDetail(dialogs, copy(lang, 'toolList'), copy(lang, 'noTools'), lang, icons)
+    return
+  }
+  while (true) {
+    const visible = server.tools.slice(0, 98)
+    const choice = await dialogs.select({
+      title: `${server.name} | ${copy(lang, 'tools', { count: server.tools.length })}`,
+      options: [
+        ...visible.map((tool, index) => ({
+          id: `tool:${index}`,
+          label: iconLabel(icons.field, shortToolName(tool.name, server.serverName)),
+        })),
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return
+    const tool = visible[Number(choice.slice('tool:'.length))]
+    if (tool) await showTool(dialogs, lang, icons, tool, server.serverName)
+  }
+}
+
+async function showTool(
+  dialogs: TuiDialogs,
+  lang: UiLang,
+  icons: IconSet,
+  tool: McpToolView,
+  serverName: string,
+): Promise<void> {
+  const schema = tool.parameters ?? {}
+  const properties = isRecord(schema.properties) ? schema.properties : {}
+  const required = new Set(Array.isArray(schema.required)
+    ? schema.required.filter((item): item is string => typeof item === 'string')
+    : [])
+  const entries = Object.entries(properties).slice(0, 96)
+  while (true) {
+    const choice = await dialogs.select({
+      title: copy(lang, 'toolTitle', {
+        name: shortToolName(tool.name, serverName),
+        count: Object.keys(properties).length,
+      }),
+      options: [
+        { id: 'description', label: iconLabel(icons.field, copy(lang, 'description')) },
+        ...entries.map(([name, value], index) => ({
+          id: `property:${index}`,
+          label: `${required.has(name) ? icons.enable : icons.disable} ${name}${PAD_CELL.repeat(2)}${schemaType(value)}${PAD_CELL.repeat(2)}${copy(lang, required.has(name) ? 'required' : 'optional')}`,
+        })),
+        { id: 'schema', label: iconLabel(icons.edit, copy(lang, 'schema')) },
+        { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+      ],
+      timeoutMs: DIALOG_TIMEOUT_MS,
+    })
+    if (!choice || choice === 'back') return
+    if (choice === 'description') {
+      await showDetail(dialogs, copy(lang, 'description'), tool.description || copy(lang, 'valueEmpty'), lang, icons)
+    }
+    if (choice === 'schema') await showDetail(dialogs, copy(lang, 'schema'), compactJson(schema), lang, icons)
+    if (choice.startsWith('property:')) {
+      const entry = entries[Number(choice.slice('property:'.length))]
+      if (entry) await showDetail(dialogs, entry[0], schemaSummary(entry[1]), lang, icons)
+    }
+  }
+}
+
+async function runReadOnlyRows(
+  dialogs: TuiDialogs,
+  title: string,
+  rows: readonly (readonly [string, string])[],
+  lang: UiLang,
+  icons: IconSet,
+): Promise<void> {
+  const width = Math.max(...rows.map(([label]) => terminalCellWidth(label)))
+  const choice = await dialogs.select({
+    title,
+    options: [
+      ...rows.map(([label, value], index) => ({
+        id: `row:${index}`,
+        label: `${padToCells(label, width)}${PAD_CELL.repeat(2)}${truncateToCells(value, 80)}`,
+      })),
+      { id: 'back', label: iconLabel(icons.back, copy(lang, 'back')) },
+    ],
+    timeoutMs: DIALOG_TIMEOUT_MS,
+  })
+  if (choice?.startsWith('row:')) {
+    const row = rows[Number(choice.slice('row:'.length))]
+    if (row) await showDetail(dialogs, row[0], row[1], lang, icons)
+  }
+}
+
+async function showDetail(
+  dialogs: TuiDialogs,
+  title: string,
+  value: string,
+  lang: UiLang,
+  icons: IconSet,
+): Promise<void> {
+  await dialogs.select({
+    title,
+    options: [{
+      id: 'ok',
+      label: iconLabel(icons.ok, copy(lang, 'ok')),
+      description: truncateToCells(value, 380),
+    }],
+    timeoutMs: DIALOG_TIMEOUT_MS,
+  })
+}
+
+function shortToolName(name: string, serverName: string): string {
+  const prefix = `mcp__${serverName}__`
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function schemaType(value: unknown): string {
+  if (!isRecord(value)) return typeof value
+  if (typeof value.type === 'string') return value.type
+  if (Array.isArray(value.type)) return value.type.map(String).join('|')
+  if (Array.isArray(value.enum)) return 'enum'
+  if (value.oneOf || value.anyOf) return 'union'
+  return 'value'
+}
+
+function schemaSummary(value: unknown): string {
+  if (!isRecord(value)) return compactJson(value)
+  const parts = [schemaType(value)]
+  if (typeof value.description === 'string' && value.description) parts.push(value.description)
+  if (value.default !== undefined) parts.push(`default=${compactJson(value.default)}`)
+  if (Array.isArray(value.enum)) parts.push(`enum=${value.enum.map(String).join(', ')}`)
+  return parts.join(' | ')
+}
+
+function compactJson(value: unknown): string {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
   }
 }
 

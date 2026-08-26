@@ -44,11 +44,6 @@ export interface McpToolView {
     description: string;
     parameters: Record<string, unknown>;
 }
-export interface McpLogEntry {
-    ts: number;
-    level: 'error' | 'warn' | 'info' | 'debug';
-    text: string;
-}
 export interface CredentialStateView {
     configured: boolean;
     source?: string;
@@ -67,7 +62,6 @@ export interface McpServerView {
     state: ServerRuntimeState;
     error?: string;
     tools: McpToolView[];
-    logs: McpLogEntry[];
     updatedAt: number;
     command?: string;
     args?: string[];
@@ -99,6 +93,20 @@ export interface McpManagerSnapshot {
         managedBlock: boolean;
     };
     servers: McpServerView[];
+}
+export type McpDoctorState = 'pass' | 'warn' | 'fail';
+export interface McpDoctorCheck {
+    id: 'storage' | 'loader' | 'target' | 'cwd' | 'credentials' | 'runtime' | 'tools';
+    state: McpDoctorState;
+    detail: string;
+    suggestion?: 'fix-permissions' | 'reload-profile' | 'edit-command' | 'edit-url' | 'edit-cwd' | 'set-credentials' | 'check-auth' | 'check-network' | 'reconnect-runtime' | 'wait-runtime';
+}
+/** Read-only diagnosis over the manager's existing Loader/MCP runtime. */
+export interface McpDoctorReport {
+    serverId: string;
+    state: McpDoctorState;
+    checkedAt: number;
+    checks: McpDoctorCheck[];
 }
 export interface ManagerErrorOptions {
     code?: string;

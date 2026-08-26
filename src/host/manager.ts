@@ -1,7 +1,9 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { resolve } from 'node:path'
+import { constants } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import {
   McpManagerSettingsSchema,
   cloneServerRecord,
@@ -15,7 +17,8 @@ import {
   ManagerError,
   type CredentialStateView,
   type ManagedServerRecord,
-  type McpLogEntry,
+  type McpDoctorCheck,
+  type McpDoctorReport,
   type McpManagerSnapshot,
   type McpServerView,
   type McpToolView,
@@ -24,7 +27,6 @@ import {
 
 const LEGACY_SETTINGS_NAMESPACE = 'mcp-manager'
 const RPC_CHANNEL = '/mcp-manager'
-const MAX_LOGS_PER_SERVER = 12
 const DIRECT_PLUGIN = '@deepseek-ai/dsh-mcp-client'
 const CREDENTIAL_PLUGIN = 'dsh-tui-mcp-manager/server'
 const LEGACY_CREDENTIAL_PLUGIN = 'dsh-mcp-manager/server'
@@ -35,9 +37,7 @@ interface RuntimeRecord {
   fingerprint: string
   state: ServerRuntimeState
   error?: string
-  logs: McpLogEntry[]
   tools: McpToolView[]
-  redactionTokens: Set<string>
   updatedAt: number
 }
 
@@ -60,16 +60,6 @@ const FIBER_STATE_ACTIVE = 2
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function argText(arg: unknown): string {
-  if (typeof arg === 'string') return arg
-  if (arg instanceof Error) return `${arg.name}: ${arg.message}`
-  try {
-    return JSON.stringify(arg)
-  } catch {
-    return String(arg)
-  }
 }
 
 function stable(value: unknown): string {
@@ -105,9 +95,7 @@ export class McpManagerService extends Service {
     this.profile = detectProfile(ctx)
     this.store = this.profile.patchPath === undefined ? undefined : new ProfilePatchStore(this.profile.patchPath)
     this.installLegacySettingsMigration()
-    this.installLogCapture()
     this.installToolRegistryTracking()
-    this.installCredentialTracking()
     this.installPatchFailureTracking()
     this.installRpcChannel()
   }
@@ -129,38 +117,10 @@ export class McpManagerService extends Service {
     })
   }
 
-  private installLogCapture(): void {
-    this.ctx.logger.exporter({
-      export: (message) => {
-        const text = message.args.map(argText).join(' ')
-        for (const record of this.records.values()) {
-          const clientMarker = `mcp-client(${record.config.serverName})`
-          const adapterMarker = `dsh-tui-mcp-manager-server(${record.config.serverName})`
-          if (!text.includes(clientMarker) && !text.includes(adapterMarker)) continue
-          const scrubbed = this.redact(text, [...record.redactionTokens])
-          record.logs.push({ ts: message.ts, level: message.type, text: scrubbed })
-          if (record.logs.length > MAX_LOGS_PER_SERVER) record.logs.shift()
-          this.applyLogTransition(record, scrubbed)
-          this.touch(record)
-        }
-      },
-    })
-  }
-
   private installToolRegistryTracking(): void {
     this.ctx.on('tools/change', () => {
       for (const record of this.records.values()) {
         this.refreshTools(record)
-      }
-    })
-  }
-
-  private installCredentialTracking(): void {
-    this.ctx.on('credentials/updated', (ref) => {
-      for (const record of this.records.values()) {
-        const used = Object.values(record.config.secretEnv ?? {}).includes(ref)
-          || Object.values(record.config.secretHeaders ?? {}).some((entry) => entry.ref === ref)
-        if (used) void this.refreshRedactionTokens(record)
       }
     })
   }
@@ -321,9 +281,7 @@ export class McpManagerService extends Service {
           config,
           fingerprint,
           state: config.enabled ? 'starting' : 'disabled',
-          logs: [],
           tools: [],
-          redactionTokens: new Set(),
           updatedAt: Date.now(),
         }
         this.records.set(config.id, record)
@@ -333,8 +291,6 @@ export class McpManagerService extends Service {
         record.fingerprint = fingerprint
         record.state = config.enabled ? 'starting' : 'disabled'
         record.error = undefined
-        record.logs = []
-        record.redactionTokens.clear()
         this.touch(record)
       } else {
         record.config = config
@@ -343,7 +299,6 @@ export class McpManagerService extends Service {
       const stateBeforeProjection = record.state
       const errorBeforeProjection = record.error
       this.refreshTools(record)
-      await this.refreshRedactionTokens(record)
       if (!config.enabled) {
         record.state = 'disabled'
         record.error = undefined
@@ -391,40 +346,117 @@ export class McpManagerService extends Service {
     this.touch(record)
   }
 
-  private applyLogTransition(record: RuntimeRecord, text: string): void {
-    const clientLabel = `mcp-client(${record.config.serverName})`
-    const adapterLabel = `dsh-tui-mcp-manager-server(${record.config.serverName})`
-    const label = text.includes(clientLabel) ? clientLabel : adapterLabel
-    const message = text.slice(text.indexOf(label) + label.length + 2)
-    if (text.includes('connection lost; reconnecting') || text.includes('connection failed; retrying')) {
-      record.state = 'reconnecting'
-      record.error = message || record.error
-    } else if (text.includes('connection attempt failed')) {
-      record.state = 'reconnecting'
-      record.error = message || record.error
-    } else if (
-      text.includes('giving up after')
-      || text.includes('failed generation did not close within')
-      || text.includes('tool registration failed')
-      || text.includes('connection lost and reconnect is disabled')
-      || text.includes('connection failed and reconnect is disabled')
-      || (text.includes('credential ') && text.includes(' is not configured'))
-      || text.includes('failed to activate mcp-client')
-    ) {
-      record.state = 'failed'
-      record.error = message || record.error
-    } else if (text.includes('reconnected and re-synced')) {
-      record.state = 'connected'
-      record.error = undefined
-    } else if (text.includes('tool re-sync failed')) {
-      record.error = message || record.error
-    }
-  }
-
   // ── RPC dispatch ──────────────────────────────────────────────────────────
 
   async invoke(endpoint: string, payload: unknown): Promise<McpManagerSnapshot> {
     return this.dispatchRpc(endpoint, payload)
+  }
+
+  /**
+   * Diagnose one server without opening another MCP transport. Runtime checks
+   * are projections of the Loader-owned client already running in this host.
+   */
+  async doctor(id: string): Promise<McpDoctorReport> {
+    await this.enqueue(() => this.syncFromFile())
+    const record = this.records.get(id)
+    if (record === undefined) throw new ManagerError(`server ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+    const view = await this.viewFor(record)
+    const checks: McpDoctorCheck[] = []
+
+    if (!this.lastStorage?.writable) {
+      checks.push({
+        id: 'storage',
+        state: 'fail',
+        detail: this.store === undefined ? 'active profile path is unavailable' : `not writable: ${this.store.path}`,
+        suggestion: 'fix-permissions',
+      })
+    }
+
+    const entry = this.loaderEntry(id)
+    const loaderApplied = this.entryMatches(record.config, entry)
+    checks.push({
+      id: 'loader',
+      state: loaderApplied ? 'pass' : 'fail',
+      detail: loaderApplied
+        ? `applied${entry?.fiber?.state === FIBER_STATE_ACTIVE ? ', Fiber active' : ', Fiber is not active yet'}`
+        : 'managed row has not been applied by the Loader',
+      ...(loaderApplied ? {} : { suggestion: 'reload-profile' as const }),
+    })
+
+    if (view.transport === 'stdio') {
+      const executable = await resolveExecutable(view.command ?? '', view.cwd, view.env?.PATH)
+      checks.push({
+        id: 'target',
+        state: executable ? 'pass' : 'fail',
+        detail: executable ? executable : `not found or not executable: ${view.command ?? ''}`,
+        ...(executable ? {} : { suggestion: 'edit-command' as const }),
+      })
+      if (view.cwd) {
+        let cwdState: McpDoctorCheck['state'] = 'pass'
+        let detail = `directory exists: ${view.cwd}`
+        try {
+          if (!(await stat(view.cwd)).isDirectory()) throw new Error('not a directory')
+        } catch (error) {
+          cwdState = 'fail'
+          detail = `invalid working directory: ${view.cwd} (${errorText(error)})`
+        }
+        checks.push({ id: 'cwd', state: cwdState, detail, ...(cwdState === 'fail' ? { suggestion: 'edit-cwd' as const } : {}) })
+      }
+    } else {
+      let state: McpDoctorCheck['state'] = 'pass'
+      let detail = view.url ?? ''
+      try {
+        const url = new URL(view.url ?? '')
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('protocol must be http or https')
+      } catch (error) {
+        state = 'fail'
+        detail = `invalid MCP URL: ${errorText(error)}`
+      }
+      checks.push({ id: 'target', state, detail, ...(state === 'fail' ? { suggestion: 'edit-url' as const } : {}) })
+    }
+
+    const credentialEntries = [
+      ...Object.entries(view.secretEnv ?? {}).map(([name, item]) => [name, item.credential] as const),
+      ...Object.entries(view.secretHeaders ?? {}).map(([name, item]) => [name, item.credential] as const),
+    ]
+    const missingCredentials = credentialEntries.filter(([, item]) => !item.configured).map(([name]) => name)
+    if (credentialEntries.length > 0) {
+      checks.push({
+        id: 'credentials',
+        state: missingCredentials.length === 0 ? 'pass' : 'fail',
+        detail: missingCredentials.length === 0
+          ? credentialEntries.map(([name]) => name).join(', ')
+          : `missing: ${missingCredentials.join(', ')}`,
+        ...(missingCredentials.length > 0 ? { suggestion: 'set-credentials' as const } : {}),
+      })
+    }
+
+    const runtimeState: McpDoctorCheck['state'] = view.state === 'connected'
+      ? 'pass'
+      : view.state === 'failed' || view.state === 'stopped'
+        ? 'fail'
+        : 'warn'
+    checks.push({
+      id: 'runtime',
+      state: runtimeState,
+      detail: view.error ? `${view.state}: ${view.error}` : view.state,
+      ...(runtimeState === 'pass' ? {} : { suggestion: runtimeSuggestion(view) }),
+    })
+    checks.push({
+      id: 'tools',
+      state: view.tools.length > 0 ? 'pass' : 'warn',
+      detail: `${view.tools.length} registered tool(s)`,
+      ...(view.tools.length > 0 ? {} : { suggestion: view.state === 'connected' ? 'reconnect-runtime' as const : 'wait-runtime' as const }),
+    })
+
+    return {
+      serverId: id,
+      state: checks.some((check) => check.state === 'fail')
+        ? 'fail'
+        : checks.some((check) => check.state === 'warn') ? 'warn' : 'pass',
+      checkedAt: Date.now(),
+      checks,
+    }
   }
 
   private async dispatchRpc(endpoint: string, payload: unknown): Promise<McpManagerSnapshot> {
@@ -508,7 +540,6 @@ export class McpManagerService extends Service {
     if (entry === undefined || !this.entryMatches(record.config, entry)) {
       throw new ManagerError('the Loader has not applied this patch row yet; retry after the patch watcher settles.', { code: 'not-active' })
     }
-    record.logs = []
     record.error = undefined
     record.state = 'starting'
     this.touch(record)
@@ -558,10 +589,6 @@ export class McpManagerService extends Service {
     return result
   }
 
-  private async refreshRedactionTokens(record: RuntimeRecord): Promise<void> {
-    for (const secret of await this.resolvedSecrets(record.config)) record.redactionTokens.add(secret)
-  }
-
   private redact(text: string, secrets: string[]): string {
     let result = text
     for (const secret of secrets) result = result.split(secret).join('***')
@@ -582,8 +609,7 @@ export class McpManagerService extends Service {
     for (const [name, entry] of Object.entries(normalizeSecretHeaderEntries(config.secretHeaders))) {
       secretHeaders[name] = { ...entry, credential: await this.credentialState(entry.ref) }
     }
-    await this.refreshRedactionTokens(record)
-    const secrets = [...record.redactionTokens]
+    const secrets = record.error === undefined ? [] : await this.resolvedSecrets(config)
 
     const view: McpServerView = {
       id: config.id,
@@ -595,7 +621,6 @@ export class McpManagerService extends Service {
       effectiveEnabled: config.enabled,
       state: record.state,
       tools: record.tools.map((tool) => ({ ...tool, parameters: tool.parameters ?? {} })),
-      logs: record.logs.map((log) => ({ ...log, text: this.redact(log.text, secrets) })),
       updatedAt: record.updatedAt,
       toolCallTimeoutMs: config.toolCallTimeoutMs,
       failOnStartupError: config.failOnStartupError,
@@ -630,6 +655,42 @@ export class McpManagerService extends Service {
       servers: await Promise.all([...this.records.values()].map((record) => this.viewFor(record))),
     }
   }
+}
+
+async function resolveExecutable(command: string, cwd?: string, configuredPath?: string): Promise<string | undefined> {
+  if (!command) return undefined
+  const mode = process.platform === 'win32' ? constants.F_OK : constants.X_OK
+  const extensions = process.platform === 'win32'
+    ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';')
+    : ['']
+  const candidates: string[] = []
+  if (command.includes('/') || command.includes('\\')) {
+    const base = cwd ? resolve(cwd) : process.cwd()
+    const target = isAbsolute(command) ? command : resolve(base, command)
+    for (const extension of extensions) candidates.push(target.endsWith(extension) ? target : target + extension)
+  } else {
+    const pathValue = configuredPath ?? process.env.PATH ?? ''
+    for (const directory of pathValue.split(delimiter).filter(Boolean)) {
+      for (const extension of extensions) candidates.push(join(directory, command + extension))
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, mode)
+      return candidate
+    } catch {
+      // Try the next PATH candidate.
+    }
+  }
+  return undefined
+}
+
+function runtimeSuggestion(view: McpServerView): NonNullable<McpDoctorCheck['suggestion']> {
+  const message = (view.error ?? '').toLowerCase()
+  if (/\b(401|403|unauthori[sz]ed|forbidden|api[-_ ]?key|credential)\b/.test(message)) return 'check-auth'
+  if (/\b(enoent|command not found|spawn)\b/.test(message)) return 'edit-command'
+  if (/\b(timeout|timed out|econn|enotfound|dns|network|fetch failed|socket)\b/.test(message)) return 'check-network'
+  return view.state === 'starting' || view.state === 'reconnecting' ? 'wait-runtime' : 'reconnect-runtime'
 }
 
 function asPayload(payload: unknown): Record<string, unknown> {

@@ -7,6 +7,8 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 
 - 浮窗即时显示服务器状态；连接中的工具数显示为 `...`，可用 `↻ 刷新` 获取最新数量。
 - 添加、编辑、启停、重连和删除 MCP server。
+- Inspector 可查看服务器概览、已注册工具、参数 schema 和最近的明确运行错误。
+- Doctor Lite 在一个浮窗中直接显示 Loader/Fiber、可执行文件或 URL、工作目录、凭据、现有运行时和工具数；失败项附带针对性的修复建议。重测复用 Loader/HMR，不会额外建立 MCP 连接。
 - 完整配置 stdio 与 streamable-http transport。
 - 编辑参数、工作目录、环境变量、请求头、超时、启动失败策略与自动重连参数。
 - 敏感环境变量和请求头通过任意 DSH credential reference 保存，不写死 credential 名称。
@@ -14,6 +16,8 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 - 跟随 dsh-TUI 的 `/lang zh` 与 `/lang en` 语言选择。
 - 表格和表单字段按终端单元格对齐，不依赖普通空格通过宿主 sanitizer。
 - 图标沿用 dsh-TUI 风格的标准 Unicode 字符，不依赖 emoji 或私用区字体。
+
+在服务器操作页中选择 `◇ 检查详情` 可逐层浏览工具和运行信息；选择 `✓ 诊断` 可在同一页查看检查值和失败建议，无需逐项打开详情。受 managed dialog 单行与数量上限约束，schema 采用逐字段页面展示，工具列表最多展示前 98 项。
 
 ## 安装
 
