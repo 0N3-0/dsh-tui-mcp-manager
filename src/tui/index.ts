@@ -90,6 +90,7 @@ const EN = {
   reconnect: 'Reconnect',
   inspect: 'Inspect',
   doctor: 'Doctor',
+  duplicate: 'Duplicate',
   doctorTitle: '{{name}} | Doctor {{state}}',
   doctorStorage: 'Profile storage',
   doctorLoader: 'Loader row',
@@ -135,7 +136,7 @@ const EN = {
   tools: '{{count}} tools',
   errorTitle: 'MCP Manager error',
   ok: 'OK',
-  serverId: 'Add MCP server — ID',
+  serverId: '{{mode}} MCP server — ID',
   serverIdPlaceholder: 'lowercase letters, numbers, dot, underscore, or dash',
   displayName: '{{mode}} MCP server — display name',
   displayNamePlaceholder: 'optional; defaults to server name',
@@ -179,6 +180,7 @@ const EN = {
   enabledPrompt: '{{mode}} MCP server — initial state',
   addMode: 'Add',
   editMode: 'Edit',
+  duplicateMode: 'Duplicate',
   formTitle: '{{mode}} MCP server form - {{id}}',
   formId: 'ID',
   formDisplayName: 'Display name',
@@ -229,6 +231,7 @@ const ZH: Record<CopyKey, string> = {
   reconnect: '重新连接',
   inspect: '检查详情',
   doctor: '诊断',
+  duplicate: '复制',
   doctorTitle: '{{name}} | 诊断 {{state}}',
   doctorStorage: 'Profile 存储',
   doctorLoader: 'Loader 配置行',
@@ -274,7 +277,7 @@ const ZH: Record<CopyKey, string> = {
   tools: '{{count}} 个工具',
   errorTitle: 'MCP 管理器错误',
   ok: '确定',
-  serverId: '添加 MCP 服务器 — ID',
+  serverId: '{{mode}} MCP 服务器 — ID',
   serverIdPlaceholder: '小写字母、数字、点、下划线或短横线',
   displayName: '{{mode}} MCP 服务器 — 显示名称',
   displayNamePlaceholder: '可选，默认使用服务器名称',
@@ -318,6 +321,7 @@ const ZH: Record<CopyKey, string> = {
   enabledPrompt: '{{mode}} MCP 服务器 — 初始状态',
   addMode: '添加',
   editMode: '编辑',
+  duplicateMode: '复制',
   formTitle: '{{mode}} MCP 服务器表单 - {{id}}',
   formId: 'ID',
   formDisplayName: '显示名称',
@@ -560,6 +564,7 @@ async function runServerActions(
       options: [
         { id: 'inspect', label: iconLabel(icons.field, copy(lang, 'inspect')) },
         { id: 'doctor', label: iconLabel(icons.enable, copy(lang, 'doctor')) },
+        { id: 'duplicate', label: iconLabel(icons.add, copy(lang, 'duplicate')) },
         {
           id: 'toggle',
           label: iconLabel(server.enabled ? icons.disable : icons.enable, copy(lang, server.enabled ? 'disable' : 'enable')),
@@ -588,6 +593,15 @@ async function runServerActions(
       }
       if (choice === 'doctor') {
         await runDoctor(ctx, dialogs, manager, icons, serverId)
+        continue
+      }
+      if (choice === 'duplicate') {
+        const input = await askForServer(dialogs, lang, snapshot, credentials, icons, server, 'duplicate')
+        if (input) {
+          await persistCredentialValues(credentials, input.credentialValues)
+          await manager.invoke('upsert', { server: input.record })
+          return true
+        }
         continue
       }
       if (choice === 'toggle') {
@@ -960,12 +974,14 @@ async function askForServer(
   credentials: CredentialProviderFace,
   icons: IconSet,
   existing?: McpServerView,
+  intent: 'add' | 'edit' | 'duplicate' = existing ? 'edit' : 'add',
 ): Promise<ServerFormSubmission | undefined> {
-  const mode = copy(lang, existing ? 'editMode' : 'addMode')
+  const mode = copy(lang, intent === 'duplicate' ? 'duplicateMode' : intent === 'edit' ? 'editMode' : 'addMode')
+  const duplicate = intent === 'duplicate' && existing !== undefined
   const draft = {
-    id: existing?.id ?? nextServerId(snapshot),
-    displayName: existing?.name ?? '',
-    serverName: existing?.serverName ?? '',
+    id: duplicate ? nextDuplicateId(snapshot, existing.id) : existing?.id ?? nextServerId(snapshot),
+    displayName: duplicate ? `${existing.name}${lang === 'zh' ? ' 副本' : ' copy'}` : existing?.name ?? '',
+    serverName: duplicate ? nextDuplicateServerName(snapshot, existing.serverName) : existing?.serverName ?? '',
     transport: existing?.transport ?? 'stdio' as ManagedServerRecord['transport'],
     command: existing?.command ?? '',
     args: formatArgs(existing?.args),
@@ -977,7 +993,7 @@ async function askForServer(
     url: existing?.url ?? '',
     headers: formatEquals(existing?.headers),
     secretHeaders: formatSecretHeaders(existing?.secretHeaders),
-    enabled: existing?.enabled ?? true,
+    enabled: duplicate ? false : existing?.enabled ?? true,
     toolCallTimeoutMs: existing?.toolCallTimeoutMs ?? 60_000,
     failOnStartupError: existing?.failOnStartupError ?? false,
     reconnect: {
@@ -1062,10 +1078,10 @@ async function askForServer(
 
   const buildSteps = (): WizardStep[] => {
     const steps: WizardStep[] = []
-    if (!existing) {
+    if (intent !== 'edit') {
       steps.push(inputStep(
         'id',
-        copy(lang, 'serverId'),
+        copy(lang, 'serverId', { mode }),
         copy(lang, 'serverIdPlaceholder'),
         () => draft.id,
         (value) => { draft.id = value },
@@ -1548,6 +1564,24 @@ function nextServerId(snapshot: McpManagerSnapshot): string {
   let index = 1
   while (existing.has(`mcp-${index}`)) index += 1
   return `mcp-${index}`
+}
+
+function nextDuplicateId(snapshot: McpManagerSnapshot, source: string): string {
+  const existing = new Set(snapshot.servers.map((server) => server.id))
+  for (let index = 1; ; index += 1) {
+    const suffix = index === 1 ? '-copy' : `-copy-${index}`
+    const candidate = `${source.slice(0, 64 - suffix.length)}${suffix}`
+    if (!existing.has(candidate)) return candidate
+  }
+}
+
+function nextDuplicateServerName(snapshot: McpManagerSnapshot, source: string): string {
+  const existing = new Set(snapshot.servers.map((server) => server.serverName))
+  for (let index = 1; ; index += 1) {
+    const suffix = index === 1 ? '_copy' : `_copy${index}`
+    const candidate = `${source.slice(0, 32 - suffix.length)}${suffix}`
+    if (!existing.has(candidate)) return candidate
+  }
 }
 
 const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/

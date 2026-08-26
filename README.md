@@ -6,7 +6,7 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 ## 功能
 
 - 浮窗即时显示服务器状态；连接中的工具数显示为 `...`，可用 `↻ 刷新` 获取最新数量。
-- 添加、编辑、启停、重连和删除 MCP server。
+- 添加、复制、编辑、启停、重连和删除 MCP server；复制会生成新的 ID 与工具命名空间，默认保持禁用，并在完整表单确认后写入。
 - Inspector 可查看服务器概览、已注册工具、参数 schema 和最近的明确运行错误。
 - Doctor Lite 在一个浮窗中直接显示 Loader/Fiber、可执行文件或 URL、工作目录、凭据、现有运行时和工具数；失败项附带针对性的修复建议。重测复用 Loader/HMR，不会额外建立 MCP 连接。
 - 完整配置 stdio 与 streamable-http transport。
