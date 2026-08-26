@@ -94,6 +94,7 @@ try {
   const requiredFiles = new Set([
     'package.json',
     'README.md',
+    'README_EN.md',
     'LICENSE',
     sourcePackage.main,
     sourcePackage.types,

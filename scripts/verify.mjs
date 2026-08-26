@@ -24,7 +24,7 @@ assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
 assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.2')
 assert.equal(pkg.scripts.prepare, undefined)
 assert.equal(pkg.scripts.prepack, 'npm run check')
-for (const required of ['lib', 'cordis.patch.yml', 'dsh-plugin.json', 'README.md', 'LICENSE']) {
+for (const required of ['lib', 'cordis.patch.yml', 'dsh-plugin.json', 'README.md', 'README_EN.md', 'LICENSE']) {
   assert.ok(pkg.files.includes(required), `package files must include ${required}`)
 }
 

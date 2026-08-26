@@ -1,5 +1,7 @@
 # dsh-tui-mcp-manager
 
+[English](README_EN.md) | 中文
+
 面向 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 的原生 MCP Server 管理插件。
 在聊天界面输入 `/mcp-manager`，即可通过 managed dialog 完成 MCP CRUD、启停、Sets、服务器复制、
 Inspector、Tool schema、Doctor Lite 与 DSH credential reference 管理。所有服务器变更直接写入
@@ -102,7 +104,7 @@ Set 的成员并集，再对服务器 patch 执行一次批量写入，不会循
 写入采用旁路锁、同目录临时文件、fsync 和原子 rename。提交前会同时校验 managed block
 和整个 Cordis YAML 文件。
 
-## 凭据与 Context7
+## 凭据相关
 
 普通字段直接交给官方 MCP client。敏感字段只保存 credential reference，实际值通过 DSH
 credentials API 写入。例如 Context7：
