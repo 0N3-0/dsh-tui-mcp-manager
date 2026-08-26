@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as yaml from 'js-yaml'
 
 const manifest = JSON.parse(await readFile(new URL('../dsh-plugin.json', import.meta.url), 'utf8'))
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -15,6 +16,22 @@ assert.equal(manifest.facets.host.entry, 'lib/types/index.js')
 assert.equal(manifest.contributes.commands[0].id, 'dsh-tui.mcp-manager')
 assert.equal(manifest.permissions[0].name, 'commands.invoke')
 assert.equal(manifest.permissions[0].scope, 'dsh-tui.mcp-manager')
+assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.2 <0.10.0')
+
+assert.equal(pkg.main, `./${manifest.facets.host.entry}`)
+assert.equal(pkg.exports['.'].import, pkg.main)
+assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
+assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.2')
+assert.equal(pkg.scripts.prepare, undefined)
+assert.equal(pkg.scripts.prepack, 'npm run check')
+for (const required of ['lib', 'cordis.patch.yml', 'dsh-plugin.json', 'README.md', 'LICENSE']) {
+  assert.ok(pkg.files.includes(required), `package files must include ${required}`)
+}
+
+const patch = yaml.load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'))
+assert.ok(Array.isArray(patch))
+assert.equal(patch[0]?.insert?.[0]?.name, pkg.name)
+assert.equal(manifest.overrides[0]?.target, 'cordis.patch.yml')
 
 const entry = await readFile(new URL('../lib/types/index.js', import.meta.url), 'utf8')
 assert.match(entry, /const name = ['"]dsh-tui-mcp-manager['"]/)
@@ -62,4 +79,4 @@ try {
   await rm(temp, { recursive: true, force: true })
 }
 
-console.log('verified manifest, Cordis entry contract, and multi-active MCP set union')
+console.log('verified package lifecycle, manifest, Cordis entry contract, and multi-active MCP set union')

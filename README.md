@@ -1,7 +1,9 @@
 # dsh-tui-mcp-manager
 
-面向 dsh-TUI 的原生 MCP Server 管理插件。输入 `/mcp-manager` 后，管理器通过宿主提供的
-managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile 的 `cordis.patch.yml`。
+面向 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 的原生 MCP Server 管理插件。
+在聊天界面输入 `/mcp-manager`，即可通过 managed dialog 完成 MCP CRUD、启停、Sets、服务器复制、
+Inspector、Tool schema、Doctor Lite 与 DSH credential reference 管理。所有服务器变更直接写入
+当前 profile 的 `cordis.patch.yml`，不引入额外配置数据库。
 
 ## 功能
 
@@ -23,14 +25,15 @@ managed dialog 显示为聊天界面上的浮窗，并直接编辑当前 profile
 
 ## 安装
 
-要求 Node.js `^22.19 || >=24` 与 dsh-TUI `0.9.x`；当前验证基线是 dsh-TUI 0.9.2。
+要求 Node.js `^22.19 || >=24` 与 dsh-TUI `0.9.x`；当前验证基线是 dsh-TUI 0.9.3。
 
 ```sh
-pnpm install
-pnpm check
-dsh plugin --profile dsh-tui add .
+dsh plugin --profile dsh-tui add github:0N3-0/dsh-tui-mcp-manager
 dsh --profile dsh-tui
 ```
+
+GitHub 安装直接使用仓库中已提交的 `lib/types/`，不需要 clone、构建或执行
+`pnpm approve-builds`，也不需要修改 profile 的 `allowBuilds`。
 
 进入 TUI 后输入：
 
@@ -45,6 +48,12 @@ dsh --profile dsh-tui
 ```text
 /lang zh
 /lang en
+```
+
+卸载插件：
+
+```sh
+dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 ```
 
 ## 文件原生化
@@ -129,18 +138,33 @@ profile patch 和 RPC snapshot 都不会显示真实值。
 - `tuiDialogs`、`tuiCommandTrees` 和 `tuiPluginHost` 都按可选能力探测；缺失时静默降级，不能阻止 TUI 启动。
 - 每个注册和子 fiber 都绑定 Cordis 生命周期并在卸载时清理。
 
-dsh-TUI 0.9.2 已提供 mediated command API，但普通 Cordis Loader row 尚不一定自动绑定
+dsh-TUI 0.9.2 至 0.9.3 提供了本插件使用的 managed dialog 与 mediated command API，当前构建和
+运行验证基线为 0.9.3。普通 Cordis Loader row 尚不一定自动绑定
 Component identity。只有宿主明确返回 `COMPONENT_NOT_ADMITTED` 时，本包才退化到旧的
 `commands.register`；权限拒绝、manifest 不兼容或其他 admission 错误不会被 fallback 绕过。
 
-当前包名保留为无 scope 的 `dsh-tui-mcp-manager`，便于先推到个人远端。若后续被生态组织
-收录，再将 npm 包名和 Cordis row 一并迁移为约定的 `@dsh-tui-ecosystem/<name>`；不要在没有
-组织发布权限时预占该 scope。`lib/types/` 构建产物按模板约定纳入版本库，Git URL 安装不依赖
-发布者机器上已有的构建目录。
+本仓库保持作者独立所有权，并使用无 scope 包名 `dsh-tui-mcp-manager`；这与
+[dsh-TUI 生态收录标准](https://github.com/dsh-tui-ecosystem/dsh-tui-ecosystem/blob/main/CONTRIBUTING.md)
+允许作者提交自有公开 GitHub 仓库、`npm` 字段可为空的模式一致，不需要为了收录迁移仓库或预占组织
+scope。`lib/types/` 构建产物按模板约定纳入版本库，Git URL 安装不依赖发布者机器上已有的构建
+目录。包不提供 `prepare`，因此 dsh 通过 pnpm 安装 Git 依赖时不会要求用户批准 TypeScript 构建
+脚本；`prepack` 只负责在开发者打包时执行完整检查。
 
 社区 manifest v0.15 目前仍是 experimental draft，本 README 只声明兼容该草案，不声称得到
 官方认证。插件在宿主进程内运行，manifest permissions 是审计和宿主策略提示，不是操作系统
 安全沙箱；安装等同于信任本包拥有当前用户对 profile patch 与 credentials provider 的权限。
+
+## 从源码开发
+
+```sh
+git clone https://github.com/0N3-0/dsh-tui-mcp-manager.git
+cd dsh-tui-mcp-manager
+pnpm install --frozen-lockfile
+pnpm check
+dsh plugin --profile dsh-tui add .
+```
+
+本地 `add .` 用于开发联调，不是普通用户的安装方式。
 
 ## 构建与发布检查
 
@@ -149,7 +173,11 @@ pnpm typecheck
 pnpm build
 pnpm verify
 npm pack --dry-run
+pnpm smoke:package
 ```
+
+`smoke:package` 会创建真实 tarball，在临时 consumer 目录安装后检查 root/server 入口可
+resolve 和 import，并验证 bundle patch、manifest 入口与必要 runtime 文件都已进入包中。
 
 构建产物：
 
