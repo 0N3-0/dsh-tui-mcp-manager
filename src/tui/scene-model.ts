@@ -93,3 +93,19 @@ export function navWindow(items: readonly NavItem[], selected: number, limit: nu
   const start = Math.min(Math.max(0, selected - Math.floor(limit / 2)), items.length - limit)
   return items.slice(start, start + limit)
 }
+
+export interface IndexedWindow<T> {
+  start: number
+  items: readonly T[]
+}
+
+export function indexedWindow<T>(items: readonly T[], selected: number, limit: number): IndexedWindow<T> {
+  const capacity = Math.max(1, Math.trunc(limit))
+  if (items.length <= capacity) return { start: 0, items }
+  const index = clamp(selected, items.length)
+  const start = Math.min(
+    Math.max(0, index - Math.floor(capacity / 2)),
+    items.length - capacity,
+  )
+  return { start, items: items.slice(start, start + capacity) }
+}

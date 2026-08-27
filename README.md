@@ -3,27 +3,42 @@
 [English](README_EN.md) | 中文
 
 面向 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 的原生 MCP Server 管理插件。
-在聊天界面输入 `/mcp-manager`，即可通过 managed dialog 完成 MCP CRUD、启停、Sets、服务器复制、
-Inspector、Tool schema、Doctor Lite 与 DSH credential reference 管理。所有服务器变更直接写入
-当前 profile 的 `cordis.patch.yml`，不引入额外配置数据库。
+在聊天界面输入 `/mcp-manager`，dsh-TUI 0.9.3 会打开原生全屏 MCP 控制台；只提供 dialog API
+的 0.9.2 会自动使用兼容浮窗。两种界面都支持 MCP CRUD、Sets、服务器复制、Tool schema、
+Doctor 与 DSH credential reference 管理。所有服务器变更直接写入当前 profile 的
+`cordis.patch.yml`，不引入额外配置数据库。
+
+## 界面预览
+
+![MCP 服务器概览](docs/images/mcp-manager-servers.png)
+
+其他界面：[Set 管理](docs/images/mcp-manager-sets.png) ·
+[工具列表](docs/images/mcp-manager-tools.png) ·
+[创建 Set](docs/images/mcp-manager-set-editor.png) ·
+[创建服务器](docs/images/mcp-manager-server-editor.png)
 
 ## 功能
 
-- 浮窗即时显示服务器状态；连接中的工具数显示为 `...`，可用 `↻ 刷新` 获取最新数量。
+- 全屏界面使用 Set / 服务器池工作区和左右双栏布局；服务器概览、工具与 Schema、诊断和配置
+  分为独立标签，长内容只滚动右栏，不会破坏左侧导航。
+- 导航与详情拥有明确焦点，`Tab` 切换区域，方向键选择节点、操作和工具；60、80、120 列终端
+  使用同一套键位并按可用高度分页。
 - 添加、复制、编辑、启停、重连和删除 MCP server；复制会生成新的 ID 与工具命名空间，默认保持禁用，并在完整表单确认后写入。
 - MCP Sets 将多个已有服务器 ID 保存为集合；所有 Set 在树中独立启停，实际启用状态取活动 Set 的成员并集。重复成员仍只对应一个 Loader row，因此只启动一次；切换通过一次 `cordis.patch.yml` 批量写入完成。
-- Set 树和各 Set 成员均可折叠；每个 Set 自带服务器池入口，可切换已有服务器成员、创建全新 MCP，或全局删除服务器并自动清理所有 Set 引用。
-- Inspector 可查看服务器概览、已注册工具、参数 schema 和最近的明确运行错误。
-- Doctor Lite 在一个浮窗中直接显示 Loader/Fiber、可执行文件或 URL、工作目录、凭据、现有运行时和工具数；失败项附带针对性的修复建议。重测复用 Loader/HMR，不会额外建立 MCP 连接。
+- Set 详情显示成员及其运行状态，Set 编辑器直接从全局服务器池切换成员；服务器工作区可创建
+  全新 MCP，或全局删除服务器并自动清理所有 Set 引用。
+- 工具页可查看完整的已注册工具列表、说明与输入 Schema；列表和 Schema 使用右栏的局部窗口滚动。
+- Doctor 标签在打开时自动检查 Loader/Fiber、可执行文件或 URL、工作目录、凭据、现有运行时和工具数；失败项附带针对性的修复建议。重测复用 Loader/HMR，不会额外建立 MCP 连接。
 - 完整配置 stdio 与 streamable-http transport。
 - 编辑参数、工作目录、环境变量、请求头、超时、启动失败策略与自动重连参数。
 - 敏感环境变量和请求头通过任意 DSH credential reference 保存，不写死 credential 名称。
-- 字段编辑时按 Esc 回到表单总览并保留草稿；总览中的 Cancel 才放弃表单。
-- 跟随 dsh-TUI 的 `/lang zh` 与 `/lang en` 语言选择。
+- 全屏表单在字段中按 Enter 返回表单导航，按 Esc 取消整个表单；保存和取消也都是可选择的行。
+- 打开管理器时读取 dsh-TUI 的 `/lang zh` 与 `/lang en` 语言选择。
 - 表格和表单字段按终端单元格对齐，不依赖普通空格通过宿主 sanitizer。
 - 图标沿用 dsh-TUI 风格的标准 Unicode 字符，不依赖 emoji 或私用区字体。
 
-在服务器操作页中选择 `◇ 检查详情` 可逐层浏览工具和运行信息；选择 `✓ 诊断` 可在同一页查看检查值和失败建议，无需逐项打开详情。受 managed dialog 单行与数量上限约束，schema 采用逐字段页面展示，工具列表最多展示前 98 项。
+在 0.9.2 兼容浮窗中，服务器概览、工具、诊断和编辑仍采用逐层 dialog。该 fallback 受宿主
+单行与数量上限约束，工具列表最多展示前 98 项；0.9.3 的全屏界面没有这项截断。
 
 ## 安装
 
@@ -43,7 +58,7 @@ GitHub 安装直接使用仓库中已提交的 `lib/types/`，不需要 clone、
 /mcp-manager
 ```
 
-服务器与 Sets 都从这个浮窗入口管理，不额外暴露子命令参数。
+服务器与 Sets 都从这个入口管理，不额外暴露子命令参数。
 
 语言由 dsh-TUI 统一管理：
 
@@ -60,10 +75,10 @@ dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 
 ## 文件原生化
 
-`cordis.patch.yml` 是唯一事实源：
+`cordis.patch.yml` 是服务器配置的唯一事实源：
 
 ```text
-dsh-TUI managed dialog
+dsh-TUI full-screen Scene / managed-dialog fallback
     -> atomic update of a managed block
 $DSH_HOME/profiles/dsh-tui/cordis.patch.yml
     -> DSH patch watcher
@@ -125,8 +140,9 @@ secretHeaders:
     prefix: ''
 ```
 
-当前 dsh-TUI input dialog 是单行明文输入，插件会提示凭据输入过程可见；保存后的服务器总览、
-profile patch 和 RPC snapshot 都不会显示真实值。
+0.9.3 全屏表单用圆点遮蔽正在输入的 credential value；0.9.2 兼容 input dialog 仍是单行明文，
+插件会提示输入过程可见。两种界面保存后的服务器总览、profile patch 和 RPC snapshot 都不会
+显示真实值。
 
 ## dsh-TUI 扩展契约
 
@@ -137,11 +153,12 @@ profile patch 和 RPC snapshot 都不会显示真实值。
 - 相对导入使用 `.js`，TypeScript 生成 JS、source map 与 declaration。
 - `dsh-plugin.json` 声明 Command contract、`commands.invoke` 权限与 Host facet。
 - 通过 `ctx.get('tuiPluginHost', false)` 使用 mediated command registration。
-- `tuiDialogs`、`tuiCommandTrees` 和 `tuiPluginHost` 都按可选能力探测；缺失时静默降级，不能阻止 TUI 启动。
+- `tuiScenes`、`tuiDialogs`、`tuiCommandTrees` 和 `tuiPluginHost` 都按能力探测；没有 Scene API
+  时回退 managed dialog，缺少必要接口时静默停用，不能阻止 TUI 启动。
 - 每个注册和子 fiber 都绑定 Cordis 生命周期并在卸载时清理。
 
-dsh-TUI 0.9.2 至 0.9.3 提供了本插件使用的 managed dialog 与 mediated command API，当前构建和
-运行验证基线为 0.9.3。普通 Cordis Loader row 尚不一定自动绑定
+dsh-TUI 0.9.3 提供本插件使用的 Scene API，0.9.2 使用 managed-dialog fallback；两者都提供
+mediated command API，当前构建和运行验证基线为 0.9.3。普通 Cordis Loader row 尚不一定自动绑定
 Component identity。只有宿主明确返回 `COMPONENT_NOT_ADMITTED` 时，本包才退化到旧的
 `commands.register`；权限拒绝、manifest 不兼容或其他 admission 错误不会被 fallback 绕过。
 
@@ -187,7 +204,8 @@ resolve 和 import，并验证 bundle patch、manifest 入口与必要 runtime �
 lib/types/index.js         Cordis 根入口
 lib/types/plugin.js        文件管理服务与 TUI 接入
 lib/types/server/index.js  credential-aware 单服务器适配器
-lib/types/tui/index.js     managed dialog 与 /mcp-manager 命令
+lib/types/tui/index.js     /mcp-manager 注册与 managed-dialog fallback
+lib/types/tui/scene.js     原生全屏 Scene
 ```
 
 目录结构：
@@ -200,6 +218,6 @@ src/plugin.ts           运行时组合与生命周期入口
 src/host/               patch store、状态投影和配置 schema
 src/host/set-store.ts   profile-local Set 定义与原子文件写入
 src/server/             credential-aware MCP client 适配器
-src/tui/                dsh-TUI 浮窗和表单
+src/tui/                dsh-TUI 全屏 Scene、兼容浮窗和共享表单
 scripts/verify.mjs      manifest 与 Cordis 入口契约检查
 ```

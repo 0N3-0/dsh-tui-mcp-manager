@@ -1,60 +1,26 @@
 import type { TuiSceneProps } from '@deepseek-harness-tui/dsh-tui/scenes'
 import type { McpManagerService } from '../host/manager.js'
-import { credentialRef, persistCredentialValues, type CredentialProviderFace } from './credential-provider.js'
+import type { CredentialProviderFace } from './credential-provider.js'
 import type {
-  ManagedSetRecord,
   McpDoctorReport,
   McpManagerSnapshot,
   McpServerView,
   McpSetView,
 } from '../host/types.js'
 import { sceneText as text, type SceneLanguage } from './scene-i18n.js'
-import {
-  buildServerSubmission,
-  createServerDraft,
-  credentialReferences,
-  validateServerDraft,
-  type ServerFormIssue,
-  type ServerFormIntent,
-} from './server-form-model.js'
+import { useServerEditorController } from './scene-server-editor-controller.js'
+import { useSetEditorController } from './scene-set-editor-controller.js'
 import {
   SCENE_POLL_MS,
   TABS,
   WORKSPACES,
   clamp,
-  nextSetId,
-  removeLastCodePoint,
   type ConfirmAction,
   type FocusArea,
   type NavItem,
   type SceneTab,
-  type ServerEditorRow,
-  type ServerEditorState,
-  type ServerTextField,
-  type SetEditorRow,
-  type SetEditorState,
   type Workspace,
 } from './scene-model.js'
-
-function serverIssueText(language: SceneLanguage, issue: ServerFormIssue): string {
-  const keys = {
-    'invalid-id': 'invalidServerId',
-    'duplicate-id': 'duplicateServerId',
-    'invalid-server-name': 'invalidServerName',
-    'duplicate-server-name': 'duplicateServerName',
-    'invalid-command': 'invalidCommand',
-    'invalid-url': 'invalidUrl',
-    'invalid-pairs': 'invalidPairs',
-    'plain-secret-env': 'plainSecretEnv',
-    'invalid-credential-refs': 'invalidCredentialRefs',
-    'plain-secret-headers': 'plainSecretHeaders',
-    'invalid-secret-headers': 'invalidSecretHeaders',
-    'invalid-positive-number': 'invalidPositiveNumber',
-    'invalid-positive-integer': 'invalidPositiveInteger',
-    'invalid-reconnect-delays': 'invalidReconnectDelays',
-  } as const
-  return text(language, keys[issue])
-}
 
 /**
  * Own every mutable Scene concern without rendering any terminal elements.
@@ -84,8 +50,6 @@ export function useMcpManagerSceneController(
   const [notice, setNotice] = React.useState<string | undefined>()
   const [error, setError] = React.useState<string | undefined>()
   const [confirm, setConfirm] = React.useState<ConfirmAction | undefined>()
-  const [setEditor, setSetEditor] = React.useState<SetEditorState | undefined>()
-  const [serverEditor, setServerEditor] = React.useState<ServerEditorState | undefined>()
   const [detailScrollTop, setDetailScrollTop] = React.useState(0)
   const mounted = React.useRef(true)
   const doctorRequest = React.useRef(0)
@@ -243,6 +207,53 @@ export function useMcpManagerSceneController(
     return false
   }
 
+  const {
+    editor: serverEditor,
+    rows: serverEditorRows,
+    open: openServerEditor,
+    activateRow: activateServerEditorRow,
+    handleInput: handleServerEditorInput,
+  } = useServerEditorController({
+    React,
+    manager,
+    credentials,
+    lang,
+    snapshot,
+    selectedServer,
+    busy,
+    ensureWritable,
+    mutate,
+    setWorkspace,
+    setSelectedServerId,
+    setFocusArea,
+    scrollDetailBy,
+    scrollDetailTo,
+    isMounted: () => mounted.current,
+  })
+
+  const {
+    editor: setEditor,
+    rows: setEditorRows,
+    openCreate: openCreateSet,
+    openEdit: openEditSet,
+    activateRow: activateSetEditorRow,
+    handleInput: handleSetEditorInput,
+  } = useSetEditorController({
+    React,
+    manager,
+    lang,
+    snapshot,
+    selectedSet,
+    busy,
+    ensureWritable,
+    mutate,
+    setSelectedSetId,
+    setFocusArea,
+    scrollDetailBy,
+    scrollDetailTo,
+    isMounted: () => mounted.current,
+  })
+
   const toggleSelected = (): void => {
     if (selectedSet === undefined || !ensureWritable()) return
     void mutate(
@@ -308,8 +319,27 @@ export function useMcpManagerSceneController(
     scrollDetailTo(0)
   }
 
+  const moveWorkspace = (): void => {
+    setWorkspace((current: Workspace) => (
+      WORKSPACES[(WORKSPACES.indexOf(current) + 1) % WORKSPACES.length]!
+    ))
+    setFocusArea('navigation')
+    setToolDetailOpen(false)
+    scrollDetailTo(0)
+  }
+
   const selectTab = (next: SceneTab): void => {
     setTab(next)
+    setFocusArea('detail')
+    setToolDetailOpen(false)
+    scrollDetailTo(0)
+  }
+
+  const moveTab = (delta: number): void => {
+    setTab((current: SceneTab) => {
+      const index = TABS.indexOf(current)
+      return TABS[(index + delta + TABS.length) % TABS.length]!
+    })
     setFocusArea('detail')
     setToolDetailOpen(false)
     scrollDetailTo(0)
@@ -324,260 +354,34 @@ export function useMcpManagerSceneController(
 
   const moveToolSelection = (delta: number): void => {
     if (selectedServer === undefined || selectedServer.tools.length === 0) return
-    const next = clamp(toolIndex + delta, selectedServer.tools.length)
-    setToolIndex(next)
+    setToolIndex((current: number) => clamp(current + delta, selectedServer.tools.length))
   }
 
-  const setEditorRows: SetEditorRow[] = setEditor === undefined
-    ? []
-    : [
-        { kind: 'field', field: 'id', editable: setEditor.mode === 'create' },
-        { kind: 'field', field: 'name', editable: true },
-        ...(snapshot?.servers ?? []).map((server: McpServerView) => ({ kind: 'member' as const, server })),
-        { kind: 'save' },
-        { kind: 'cancel' },
-      ]
-
-  const openCreateSet = (): void => {
-    if (snapshot === undefined || busy !== undefined || !ensureWritable()) return
-    setSetEditor({
-      mode: 'create',
-      draft: { id: nextSetId(snapshot), name: '', serverIds: [] },
-      selected: 0,
-    })
+  const moveOpenTool = (delta: number): void => {
+    if (selectedServer === undefined || selectedServer.tools.length === 0) return
+    setToolIndex((current: number) => clamp(current + delta, selectedServer.tools.length))
     setFocusArea('detail')
+    setToolDetailOpen(true)
     scrollDetailTo(0)
   }
 
-  const openEditSet = (): void => {
-    if (selectedSet === undefined || busy !== undefined || !ensureWritable()) return
-    setSetEditor({
-      mode: 'edit',
-      draft: { id: selectedSet.id, name: selectedSet.name, serverIds: [...selectedSet.serverIds] },
-      selected: 1,
-    })
-    setFocusArea('detail')
+  const moveNavSelection = (delta: number): void => {
+    if (navItems.length === 0) return
+    setFocusArea('navigation')
     scrollDetailTo(0)
-  }
-
-  const moveSetEditorSelection = (delta: number): void => {
-    setSetEditor((current: SetEditorState | undefined) => {
-      if (current === undefined) return current
-      const selected = clamp(current.selected + delta, setEditorRows.length)
-      scrollDetailTo(selected)
-      return { ...current, selected, error: undefined }
-    })
-  }
-
-  const activateSetEditorRow = (index: number): void => {
-    if (setEditor === undefined || busy !== undefined) return
-    const row = setEditorRows[index]
-    if (row === undefined) return
-    if (row.kind === 'field') {
-      if (row.editable) setSetEditor({ ...setEditor, selected: index, editing: row.field, error: undefined })
-      return
-    }
-    if (row.kind === 'member') {
-      const members = new Set(setEditor.draft.serverIds)
-      if (members.has(row.server.id)) members.delete(row.server.id)
-      else members.add(row.server.id)
-      setSetEditor({
-        ...setEditor,
-        selected: index,
-        error: undefined,
-        draft: { ...setEditor.draft, serverIds: [...members] },
+    if (workspace === 'servers') {
+      setSelectedServerId((current: string) => {
+        const index = navItems.findIndex((item) => item.kind === 'server' && item.server.id === current)
+        const next = navItems[clamp((index < 0 ? 0 : index) + delta, navItems.length)]
+        return next?.kind === 'server' ? next.server.id : current
       })
       return
     }
-    if (row.kind === 'cancel') {
-      setSetEditor(undefined)
-      return
-    }
-    const record: ManagedSetRecord = {
-      id: setEditor.draft.id.trim(),
-      name: setEditor.draft.name.trim(),
-      serverIds: [...setEditor.draft.serverIds],
-    }
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(record.id)) {
-      setSetEditor({ ...setEditor, selected: index, error: text(lang, 'invalidSetId') })
-      return
-    }
-    if (setEditor.mode === 'create' && snapshot?.sets.some((set: McpSetView) => set.id === record.id)) {
-      setSetEditor({ ...setEditor, selected: index, error: text(lang, 'duplicateSetId') })
-      return
-    }
-    if (record.name.length === 0 || Array.from(record.name).length > 80) {
-      setSetEditor({ ...setEditor, selected: index, error: text(lang, 'invalidSetName') })
-      return
-    }
-    void mutate(
-      () => manager.invoke('upsertSet', { set: record }),
-      text(lang, 'save'),
-      text(lang, 'updated'),
-    ).then((saved) => {
-      if (!saved || !mounted.current) return
-      setSelectedSetId(record.id)
-      setSetEditor(undefined)
+    setSelectedSetId((current: string) => {
+      const index = navItems.findIndex((item) => item.kind === 'set' && item.set.id === current)
+      const next = navItems[clamp((index < 0 ? 0 : index) + delta, navItems.length)]
+      return next?.kind === 'set' ? next.set.id : current
     })
-  }
-
-  const serverEditorRows: ServerEditorRow[] = serverEditor === undefined
-    ? []
-    : [
-        { kind: 'field', field: 'id', editable: serverEditor.intent !== 'edit' },
-        { kind: 'field', field: 'displayName', editable: true },
-        { kind: 'field', field: 'serverName', editable: true },
-        { kind: 'transport' },
-        ...(serverEditor.draft.transport === 'stdio'
-          ? [
-              { kind: 'field' as const, field: 'command' as const, editable: true },
-              { kind: 'field' as const, field: 'args' as const, editable: true },
-              { kind: 'field' as const, field: 'cwd' as const, editable: true },
-              { kind: 'field' as const, field: 'env' as const, editable: true },
-              { kind: 'field' as const, field: 'secretEnv' as const, editable: true },
-            ]
-          : [
-              { kind: 'field' as const, field: 'url' as const, editable: true },
-              { kind: 'field' as const, field: 'headers' as const, editable: true },
-              { kind: 'field' as const, field: 'secretHeaders' as const, editable: true },
-            ]),
-        ...credentialReferences(serverEditor.draft).map((ref) => ({ kind: 'credential' as const, ref })),
-        { kind: 'field', field: 'toolCallTimeoutMs', editable: true },
-        { kind: 'boolean', field: 'failOnStartupError' },
-        { kind: 'boolean', field: 'reconnectEnabled' },
-        { kind: 'field', field: 'reconnectInitialDelayMs', editable: true },
-        { kind: 'field', field: 'reconnectMaxDelayMs', editable: true },
-        { kind: 'field', field: 'reconnectMaxAttempts', editable: true },
-        { kind: 'save' },
-        { kind: 'cancel' },
-      ]
-
-  const openServerEditor = (intent: ServerFormIntent): void => {
-    if (snapshot === undefined || busy !== undefined || !ensureWritable()) return
-    const existing = intent === 'create' ? undefined : selectedServer
-    if (intent !== 'create' && existing === undefined) return
-    setServerEditor({
-      intent,
-      ...(existing === undefined ? {} : { originalId: existing.id }),
-      draft: createServerDraft(snapshot, intent, existing, lang),
-      selected: 0,
-    })
-    setFocusArea('detail')
-    scrollDetailTo(0)
-  }
-
-  const closeServerEditor = (): void => {
-    setServerEditor(undefined)
-  }
-
-  const moveServerEditorSelection = (delta: number): void => {
-    setServerEditor((current: ServerEditorState | undefined) => {
-      if (current === undefined) return current
-      const selected = clamp(current.selected + delta, serverEditorRows.length)
-      scrollDetailTo(selected)
-      return { ...current, selected, error: undefined }
-    })
-  }
-
-  const saveServerEditor = async (editor: ServerEditorState, index: number): Promise<void> => {
-    if (snapshot === undefined || busy !== undefined) return
-    const issue = validateServerDraft(editor.draft, snapshot, editor.intent, editor.originalId)
-    if (issue !== undefined) {
-      setServerEditor({ ...editor, selected: index, error: serverIssueText(lang, issue) })
-      return
-    }
-    const refs = credentialReferences(editor.draft)
-    if (refs.length > 0 && credentials === undefined) {
-      setServerEditor({ ...editor, selected: index, error: text(lang, 'credentialUnavailable') })
-      return
-    }
-    if (credentials !== undefined) {
-      for (const ref of refs) {
-        const info = await credentials.describe(credentialRef(ref)).catch(() => ({ configured: false, writable: false }))
-        const pending = editor.draft.credentialValues[ref]
-        if (pending !== undefined && !info.writable) {
-          setServerEditor({
-            ...editor,
-            selected: index,
-            error: text(lang, 'credentialReadOnly').replace('{ref}', ref),
-          })
-          return
-        }
-        if (pending === undefined && !info.configured) {
-          setServerEditor({
-            ...editor,
-            selected: index,
-            error: text(lang, 'credentialRequired').replace('{ref}', ref),
-          })
-          return
-        }
-      }
-    }
-    const submission = buildServerSubmission(editor.draft)
-    const saved = await mutate(
-      async () => {
-        if (credentials !== undefined) await persistCredentialValues(credentials, submission.credentialValues)
-        return manager.invoke('upsert', { server: submission.record })
-      },
-      text(lang, 'save'),
-      text(lang, 'updated'),
-    )
-    if (!saved || !mounted.current) return
-    setWorkspace('servers')
-    setSelectedServerId(submission.record.id)
-    setServerEditor(undefined)
-  }
-
-  const activateServerEditorRow = (index: number): void => {
-    if (serverEditor === undefined || busy !== undefined) return
-    const row = serverEditorRows[index]
-    if (row === undefined) return
-    if (row.kind === 'field') {
-      if (row.editable) {
-        setServerEditor({
-          ...serverEditor,
-          selected: index,
-          editing: { kind: 'field', field: row.field },
-          error: undefined,
-        })
-      }
-      return
-    }
-    if (row.kind === 'credential') {
-      setServerEditor({
-        ...serverEditor,
-        selected: index,
-        editing: { kind: 'credential', ref: row.ref },
-        error: undefined,
-      })
-      return
-    }
-    if (row.kind === 'transport') {
-      setServerEditor({
-        ...serverEditor,
-        selected: index,
-        error: undefined,
-        draft: {
-          ...serverEditor.draft,
-          transport: serverEditor.draft.transport === 'stdio' ? 'streamable-http' : 'stdio',
-        },
-      })
-      return
-    }
-    if (row.kind === 'boolean') {
-      setServerEditor({
-        ...serverEditor,
-        selected: index,
-        error: undefined,
-        draft: { ...serverEditor.draft, [row.field]: !serverEditor.draft[row.field] },
-      })
-      return
-    }
-    if (row.kind === 'cancel') {
-      closeServerEditor()
-      return
-    }
-    void saveServerEditor(serverEditor, index)
   }
 
   const detailActionCount = setEditor !== undefined || serverEditor !== undefined
@@ -619,186 +423,8 @@ export function useMcpManagerSceneController(
       else if (key.escape) cancelRemoval()
       return
     }
-    if (serverEditor !== undefined) {
-      if (serverEditor.editing !== undefined) {
-        const editing = serverEditor.editing
-        if (key.escape) {
-          closeServerEditor()
-          return
-        }
-        if (key.return) {
-          if (editing.kind === 'credential' && serverEditor.draft.credentialValues[editing.ref] === '') {
-            const credentialValues = { ...serverEditor.draft.credentialValues }
-            delete credentialValues[editing.ref]
-            setServerEditor({
-              ...serverEditor,
-              editing: undefined,
-              error: undefined,
-              draft: { ...serverEditor.draft, credentialValues },
-            })
-          } else {
-            setServerEditor({ ...serverEditor, editing: undefined, error: undefined })
-          }
-          return
-        }
-        if (key.ctrl && lower === 'u') {
-          if (editing.kind === 'field') {
-            setServerEditor({
-              ...serverEditor,
-              error: undefined,
-              draft: { ...serverEditor.draft, [editing.field]: '' },
-            })
-          } else {
-            setServerEditor({
-              ...serverEditor,
-              error: undefined,
-              draft: {
-                ...serverEditor.draft,
-                credentialValues: { ...serverEditor.draft.credentialValues, [editing.ref]: '' },
-              },
-            })
-          }
-          return
-        }
-        if (key.backspace) {
-          if (editing.kind === 'field') {
-            setServerEditor({
-              ...serverEditor,
-              error: undefined,
-              draft: {
-                ...serverEditor.draft,
-                [editing.field]: removeLastCodePoint(serverEditor.draft[editing.field]),
-              },
-            })
-          } else {
-            const value = serverEditor.draft.credentialValues[editing.ref] ?? ''
-            setServerEditor({
-              ...serverEditor,
-              error: undefined,
-              draft: {
-                ...serverEditor.draft,
-                credentialValues: {
-                  ...serverEditor.draft.credentialValues,
-                  [editing.ref]: removeLastCodePoint(value),
-                },
-              },
-            })
-          }
-          return
-        }
-        if (!key.ctrl && !key.meta && !key.super) {
-          const printable = input.replace(/[\u0000-\u001f\u007f]/g, '')
-          if (printable !== '') {
-            if (editing.kind === 'field') {
-              const field: ServerTextField = editing.field
-              const limits: Partial<Record<ServerTextField, number>> = {
-                id: 64,
-                displayName: 80,
-                serverName: 32,
-                toolCallTimeoutMs: 16,
-                reconnectInitialDelayMs: 16,
-                reconnectMaxDelayMs: 16,
-                reconnectMaxAttempts: 16,
-              }
-              const limit = limits[field] ?? 4096
-              const value = Array.from(`${serverEditor.draft[field]}${printable}`).slice(0, limit).join('')
-              setServerEditor({
-                ...serverEditor,
-                error: undefined,
-                draft: { ...serverEditor.draft, [field]: value },
-              })
-            } else {
-              const current = serverEditor.draft.credentialValues[editing.ref] ?? ''
-              const value = Array.from(`${current}${printable}`).slice(0, 8192).join('')
-              setServerEditor({
-                ...serverEditor,
-                error: undefined,
-                draft: {
-                  ...serverEditor.draft,
-                  credentialValues: { ...serverEditor.draft.credentialValues, [editing.ref]: value },
-                },
-              })
-            }
-          }
-        }
-        return
-      }
-      if (key.escape) {
-        closeServerEditor()
-        return
-      }
-      if (key.upArrow) {
-        moveServerEditorSelection(-1)
-        return
-      }
-      if (key.downArrow) {
-        moveServerEditorSelection(1)
-        return
-      }
-      if (key.return) {
-        activateServerEditorRow(serverEditor.selected)
-        return
-      }
-      if (key.pageUp || key.pageDown || key.wheelUp || key.wheelDown) {
-        scrollDetailBy(key.pageUp || key.wheelUp ? -5 : 5)
-      }
-      return
-    }
-    if (setEditor !== undefined) {
-      if (setEditor.editing !== undefined) {
-        if (key.escape) {
-          setSetEditor(undefined)
-          return
-        }
-        if (key.return) {
-          setSetEditor({ ...setEditor, editing: undefined, error: undefined })
-          return
-        }
-        if (key.backspace) {
-          const field = setEditor.editing
-          setSetEditor({
-            ...setEditor,
-            error: undefined,
-            draft: { ...setEditor.draft, [field]: removeLastCodePoint(setEditor.draft[field]) },
-          })
-          return
-        }
-        if (!key.ctrl && !key.meta && !key.super) {
-          const printable = input.replace(/[\u0000-\u001f\u007f]/g, '')
-          if (printable !== '') {
-            const field = setEditor.editing
-            const limit = field === 'id' ? 64 : 80
-            const value = Array.from(`${setEditor.draft[field]}${printable}`).slice(0, limit).join('')
-            setSetEditor({
-              ...setEditor,
-              error: undefined,
-              draft: { ...setEditor.draft, [field]: value },
-            })
-          }
-        }
-        return
-      }
-      if (key.escape) {
-        setSetEditor(undefined)
-        return
-      }
-      if (key.upArrow) {
-        moveSetEditorSelection(-1)
-        return
-      }
-      if (key.downArrow) {
-        moveSetEditorSelection(1)
-        return
-      }
-      if (key.return) {
-        activateSetEditorRow(setEditor.selected)
-        return
-      }
-      if (key.pageUp || key.pageDown || key.wheelUp || key.wheelDown) {
-        scrollDetailBy(key.pageUp || key.wheelUp ? -5 : 5)
-      }
-      return
-    }
+    if (handleServerEditorInput(input, key)) return
+    if (handleSetEditorInput(input, key)) return
     if (tab === 'tools' && selectedServer !== undefined && toolDetailOpen && key.escape) {
       setToolDetailOpen(false)
       scrollDetailTo(0)
@@ -811,31 +437,29 @@ export function useMcpManagerSceneController(
     }
     if (key.ctrl || key.meta || key.super) return
     if (key.tab) {
-      setFocusArea(focusArea === 'navigation' ? 'detail' : 'navigation')
+      setFocusArea((current: FocusArea) => current === 'navigation' ? 'detail' : 'navigation')
       return
     }
     if (lower === 'w') {
-      selectWorkspace(WORKSPACES[(WORKSPACES.indexOf(workspace) + 1) % WORKSPACES.length]!)
+      moveWorkspace()
       return
     }
-    if (key.wheelUp || key.wheelDown) {
+    if (focusArea === 'detail' && (key.wheelUp || key.wheelDown)) {
       scrollDetailBy(key.wheelUp ? -3 : 3)
       return
     }
-    if (key.pageUp || key.pageDown) {
+    if (focusArea === 'detail' && (key.pageUp || key.pageDown)) {
       scrollDetailBy(key.pageUp ? -10 : 10)
       return
     }
 
     if (focusArea === 'navigation') {
       if (key.upArrow) {
-        const next = clamp(selectedIndex - 1, navItems.length)
-        if (navItems[next] !== undefined) selectNavItem(navItems[next]!)
+        moveNavSelection(-1)
         return
       }
       if (key.downArrow) {
-        const next = clamp(selectedIndex + 1, navItems.length)
-        if (navItems[next] !== undefined) selectNavItem(navItems[next]!)
+        moveNavSelection(1)
         return
       }
       if (key.return && selected !== undefined) {
@@ -856,24 +480,20 @@ export function useMcpManagerSceneController(
         return
       }
       if (selectedServer !== undefined && (key.leftArrow || key.rightArrow)) {
-        const current = TABS.indexOf(tab)
-        const direction = key.leftArrow ? -1 : 1
-        selectTab(TABS[(current + direction + TABS.length) % TABS.length]!)
+        moveTab(key.leftArrow ? -1 : 1)
         return
       }
     } else if (selectedServer !== undefined) {
       if (key.leftArrow || key.rightArrow) {
-        const current = TABS.indexOf(tab)
-        const direction = key.leftArrow ? -1 : 1
-        selectTab(TABS[(current + direction + TABS.length) % TABS.length]!)
+        moveTab(key.leftArrow ? -1 : 1)
         return
       }
       if (tab === 'tools' && toolDetailOpen && key.downArrow) {
-        openTool(clamp(toolIndex + 1, selectedServer.tools.length))
+        moveOpenTool(1)
         return
       }
       if (tab === 'tools' && toolDetailOpen && key.upArrow) {
-        openTool(clamp(toolIndex - 1, selectedServer.tools.length))
+        moveOpenTool(-1)
         return
       }
       if (tab === 'tools' && !toolDetailOpen && key.upArrow) {
@@ -906,8 +526,8 @@ export function useMcpManagerSceneController(
         return
       }
     }
-    if (lower === 'a' && workspace === 'sets') openCreateSet()
-    else if (lower === 'a' && workspace === 'servers') openServerEditor('create')
+    if (focusArea === 'navigation' && lower === 'a' && workspace === 'sets') openCreateSet()
+    else if (focusArea === 'navigation' && lower === 'a' && workspace === 'servers') openServerEditor('create')
     else if (lower === 'r') void load(true)
   })
 

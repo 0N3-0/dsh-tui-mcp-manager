@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as yaml from 'js-yaml'
 
 const manifest = JSON.parse(await readFile(new URL('../dsh-plugin.json', import.meta.url), 'utf8'))
@@ -49,20 +50,51 @@ assert.doesNotMatch(
 )
 assert.match(tuiEntry, /const scenes = tuiCtx\.get\?\.\(['"]tuiScenes['"], false\)/)
 const sceneEntry = await readFile(new URL('../lib/types/tui/scene.js', import.meta.url), 'utf8')
+const sceneControllerEntry = await readFile(new URL('../lib/types/tui/scene-controller.js', import.meta.url), 'utf8')
 assert.doesNotMatch(sceneEntry, /\bScrollBox\s*[,)]|ink-box/)
 assert.match(sceneEntry, /overflow: ['"]hidden['"]/)
 assert.match(sceneEntry, /top: -visibleDetailScrollTop/)
 assert.match(sceneEntry, /renderServerEditorView/)
+assert.match(sceneEntry, /renderServerDetailView/)
+assert.match(sceneEntry, /renderSetDetailView/)
+assert.match(sceneEntry, /renderSetEditorView/)
 assert.doesNotMatch(sceneEntry, /function serverFieldLabel/)
+assert.doesNotMatch(sceneEntry, /function yesNo|function json/)
+const serverDetailView = await readFile(new URL('../lib/types/tui/scene-server-detail.js', import.meta.url), 'utf8')
+assert.match(serverDetailView, /function renderServerDetailView/)
+assert.match(serverDetailView, /function serverStateGlyph/)
+assert.match(serverDetailView, /doctorCheckLabel/)
+const setDetailView = await readFile(new URL('../lib/types/tui/scene-set-detail.js', import.meta.url), 'utf8')
+assert.match(setDetailView, /function renderSetDetailView/)
+assert.match(setDetailView, /function renderSetEditorView/)
+assert.match(setDetailView, /runtimeStateText/)
 const serverEditorView = await readFile(new URL('../lib/types/tui/scene-server-editor.js', import.meta.url), 'utf8')
 assert.match(serverEditorView, /function serverFieldLabel/)
 assert.match(serverEditorView, /React\.createElement/)
+const serverEditorController = await import('../lib/types/tui/scene-server-editor-controller.js')
+const setEditorController = await import('../lib/types/tui/scene-set-editor-controller.js')
+assert.match(sceneControllerEntry, /useSetEditorController/)
+assert.doesNotMatch(sceneControllerEntry, /invalidSetId|function moveSetEditorSelection/)
 const managerEntry = await readFile(new URL('../lib/types/host/manager.js', import.meta.url), 'utf8')
 assert.match(managerEntry, /subscribe\(listener\)/)
 const presentation = await import('../lib/types/tui/presentation.js')
+const sceneModel = await import('../lib/types/tui/scene-model.js')
 assert.equal(presentation.runtimeStateText('zh', 'connected'), '已连接')
 assert.equal(presentation.doctorCheckStringKey('credentials'), 'doctorCredentials')
 assert.equal(presentation.doctorSuggestionStringKey('check-auth'), 'suggestCheckAuth')
+const manyTools = Array.from({ length: 120 }, (_, index) => `tool-${index}`)
+assert.deepEqual(sceneModel.indexedWindow(manyTools, 0, 10), {
+  start: 0,
+  items: manyTools.slice(0, 10),
+})
+assert.deepEqual(sceneModel.indexedWindow(manyTools, 119, 10), {
+  start: 110,
+  items: manyTools.slice(110),
+})
+assert.deepEqual(sceneModel.indexedWindow(manyTools, 60, 9), {
+  start: 56,
+  items: manyTools.slice(56, 65),
+})
 
 const serverForm = await import('../lib/types/tui/server-form-model.js')
 assert.deepEqual(serverForm.parseArgs('node "two words" --flag'), ['node', 'two words', '--flag'])
@@ -98,6 +130,24 @@ assert.deepEqual(httpSubmission.credentialValues, {
 httpDraft.headers = 'api-key=plain-text-secret'
 assert.equal(serverForm.validateServerDraft(httpDraft, emptySnapshot, 'create'), 'plain-secret-headers')
 httpDraft.headers = ''
+const httpRows = serverEditorController.serverEditorRowsFor({
+  intent: 'create',
+  draft: httpDraft,
+  selected: 0,
+})
+assert.equal(httpRows.some((row) => row.kind === 'field' && row.field === 'url'), true)
+assert.equal(httpRows.some((row) => row.kind === 'field' && row.field === 'command'), false)
+assert.deepEqual(httpRows.filter((row) => row.kind === 'credential').map((row) => row.ref), ['CONTEXT7_API_KEY'])
+const setRows = setEditorController.setEditorRowsFor({
+  mode: 'create',
+  draft: { id: 'set-1', name: '', serverIds: [] },
+  selected: 0,
+}, [{ id: 'context7', name: 'Context7' }])
+assert.deepEqual(setRows.slice(0, 2), [
+  { kind: 'field', field: 'id', editable: true },
+  { kind: 'field', field: 'name', editable: true },
+])
+assert.equal(setRows.some((row) => row.kind === 'member' && row.server.id === 'context7'), true)
 
 const {
   ProfileSetStore,
@@ -142,8 +192,66 @@ try {
   )
   await store.write(stored.sets, [])
   assert.equal((await store.read()).initialized, true)
+
+  // Exercise the authoritative refresh used by the Scene's low-frequency
+  // poll without touching a real DSH profile. A second store instance stands
+  // in for an editor/process changing the profile while the Scene is open.
+  const previousDshHome = process.env.DSH_HOME
+  try {
+    process.env.DSH_HOME = temp
+    const profileDir = join(temp, 'profiles', 'external-edit')
+    const patchPath = join(profileDir, 'cordis.patch.yml')
+    await mkdir(profileDir, { recursive: true })
+    const { Context } = await import('@deepseek-ai/cordis')
+    const { McpManagerService } = await import('../lib/types/host/manager.js')
+    const { ProfilePatchStore } = await import('../lib/types/host/patch-store.js')
+    const externalPatchStore = new ProfilePatchStore(patchPath)
+    const server = {
+      id: 'external',
+      name: 'Before external edit',
+      serverName: 'external',
+      transport: 'stdio',
+      enabled: true,
+      command: 'before',
+      args: [],
+      env: {},
+      secretEnv: {},
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: false,
+      reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30_000, maxAttempts: 10 },
+    }
+    await externalPatchStore.write([server])
+
+    const ctx = new Context().extend({ baseUrl: pathToFileURL(`${profileDir}/`).href })
+    ctx.provide('tools', { schemas: () => [] })
+    ctx.provide('loader', { entries: () => [] })
+    const manager = new McpManagerService(ctx)
+    const beforeExternalEdit = await manager.invoke('list', {})
+    assert.equal(beforeExternalEdit.profile.key, 'external-edit')
+    assert.equal(beforeExternalEdit.servers[0]?.name, 'Before external edit')
+
+    await new ProfilePatchStore(patchPath).write([{
+      ...server,
+      name: 'After external edit',
+      command: 'after',
+    }])
+    const afterExternalPatchEdit = await manager.invoke('list', {})
+    assert.equal(afterExternalPatchEdit.servers[0]?.name, 'After external edit')
+    assert.equal(afterExternalPatchEdit.servers[0]?.command, 'after')
+    assert.ok(afterExternalPatchEdit.revision > beforeExternalEdit.revision)
+
+    await new ProfileSetStore(join(profileDir, 'mcp-manager.sets.yml')).write([
+      { id: 'external-set', name: 'Externally edited Set', serverIds: ['external'] },
+    ], ['external-set'])
+    const afterExternalSetEdit = await manager.invoke('list', {})
+    assert.deepEqual(afterExternalSetEdit.sets.map((set) => set.name), ['Externally edited Set'])
+    assert.deepEqual(afterExternalSetEdit.activeSetIds, ['external-set'])
+  } finally {
+    if (previousDshHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousDshHome
+  }
 } finally {
   await rm(temp, { recursive: true, force: true })
 }
 
-console.log('verified package lifecycle, manifest, Cordis entry contract, and multi-active MCP set union')
+console.log('verified package lifecycle, manifest, Cordis entry contract, Set union, and external profile refresh')

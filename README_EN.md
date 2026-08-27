@@ -3,30 +3,50 @@
 English | [中文](README.md)
 
 A native MCP server manager for [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
-Run `/mcp-manager` in the chat interface to manage MCP CRUD, enablement, Sets, server duplication,
-Inspector, tool schemas, Doctor Lite, and DSH credential references through a managed dialog. All
-server changes are written directly to the active profile's `cordis.patch.yml`; no additional
-configuration database is introduced.
+Run `/mcp-manager` in the chat interface. dsh-TUI 0.9.3 opens a native full-screen MCP control center,
+while 0.9.2 hosts that expose only the dialog API automatically use the compatibility dialog. Both
+interfaces manage MCP CRUD, Sets, server duplication, tool schemas, Doctor checks, and DSH credential
+references. All server changes are written directly to the active profile's `cordis.patch.yml`; no
+additional configuration database is introduced.
+
+## Interface Preview
+
+![MCP server overview](docs/images/mcp-manager-servers.png)
+
+More views: [Set management](docs/images/mcp-manager-sets.png) ·
+[Tool list](docs/images/mcp-manager-tools.png) ·
+[Create Set](docs/images/mcp-manager-set-editor.png) ·
+[Create server](docs/images/mcp-manager-server-editor.png)
 
 ## Features
 
-- Shows live server state in a dialog. Tool counts display as `...` while connecting and can be updated with `↻ Refresh`.
+- Uses Set and server-pool workspaces in a two-pane full-screen interface. Server overview, tools and
+  schemas, Doctor checks, and configuration live on separate tabs; long content scrolls only in the
+  right pane and never damages navigation.
+- Gives navigation and detail explicit focus. `Tab` changes panes and arrow keys select nodes, actions,
+  and tools. The same bindings work in tested 60-, 80-, and 120-column layouts.
 - Adds, duplicates, edits, enables, disables, reconnects, and deletes MCP servers. A duplicate receives a new ID and tool namespace, remains disabled by default, and is written only after the full form is confirmed.
 - Stores groups of existing server IDs as MCP Sets. Each Set can be enabled independently, while the effective state is the union of all active Sets. A server shared by several Sets still maps to one Loader row and starts only once. Set switching updates `cordis.patch.yml` in one batch write.
-- Provides collapsible Set and member trees. Each Set has a server-pool action for changing membership, creating a new MCP server, or deleting a server globally while cleaning up all Set references.
-- Inspector shows the server overview, registered tools, parameter schemas, and the latest explicit runtime error.
-- Doctor Lite reports Loader/Fiber state, executable or URL, working directory, credentials, current runtime, and tool count in one dialog. Failed checks include targeted remediation. Retesting reuses Loader/HMR and does not create another MCP connection.
+- Shows each Set's members and runtime state, and edits membership directly against the global server
+  pool. The server workspace creates new MCP servers or deletes one globally while cleaning up every Set
+  reference.
+- The Tools tab shows the complete registered-tool list, descriptions, and input schemas through a
+  pane-local viewport.
+- The Doctor tab runs automatically when opened and reports Loader/Fiber state, executable or URL,
+  working directory, credentials, current runtime, and tool count. Failed checks include targeted
+  remediation. Retesting reuses Loader/HMR and does not create another MCP connection.
 - Fully configures both `stdio` and `streamable-http` transports.
 - Edits arguments, working directory, environment variables, request headers, timeouts, startup-failure policy, and automatic reconnect settings.
 - Stores sensitive environment variables and headers through arbitrary DSH credential references instead of hard-coded credential names.
-- Preserves the current draft when Esc returns from a field to the form summary. Only Cancel on the summary discards the form.
-- Follows the dsh-TUI language selected with `/lang zh` or `/lang en`.
+- In the full-screen form, Enter returns from field editing to form navigation and Esc cancels the whole
+  form. Save and Cancel are also selectable rows.
+- Reads the dsh-TUI language selected with `/lang zh` or `/lang en` when the manager opens.
 - Aligns tables and form fields by terminal cells without depending on regular spaces surviving the host sanitizer.
 - Uses the standard Unicode symbols from dsh-TUI and does not depend on emoji or private-use fonts.
 
-Choose `◇ Inspect` on a server action page to browse tools and runtime information. Choose `✓ Doctor`
-to view check results and remediation in the same dialog. Because managed dialogs limit line length and
-item count, schemas are shown one field at a time and tool lists display at most the first 98 entries.
+On dsh-TUI 0.9.2, the compatibility interface keeps server overview, tools, Doctor, and editing in
+nested dialogs. That fallback is subject to the host's single-line and item-count limits and displays at
+most the first 98 tools; the 0.9.3 full-screen interface does not apply that truncation.
 
 ## Installation
 
@@ -46,7 +66,7 @@ In the TUI, run:
 /mcp-manager
 ```
 
-Both servers and Sets are managed from this dialog; no additional command arguments are exposed.
+Both servers and Sets are managed from this entry point; no additional command arguments are exposed.
 
 dsh-TUI controls the interface language:
 
@@ -63,10 +83,10 @@ dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 
 ## File-Native Configuration
 
-`cordis.patch.yml` is the source of truth:
+`cordis.patch.yml` is the source of truth for server configuration:
 
 ```text
-dsh-TUI managed dialog
+dsh-TUI full-screen Scene / managed-dialog fallback
     -> atomic update of a managed block
 $DSH_HOME/profiles/dsh-tui/cordis.patch.yml
     -> DSH patch watcher
@@ -131,9 +151,9 @@ secretHeaders:
     prefix: ''
 ```
 
-The current dsh-TUI input dialog displays single-line input as plain text, so the plugin warns that a
-credential is visible while it is entered. Saved server summaries, profile patches, and RPC snapshots
-never expose the value.
+The 0.9.3 full-screen form masks credential values with bullets while they are entered. The 0.9.2
+compatibility input dialog remains single-line plain text, so the plugin warns that its input is visible.
+Neither interface exposes saved values in server summaries, profile patches, or RPC snapshots.
 
 ## dsh-TUI Extension Contract
 
@@ -144,11 +164,14 @@ The package follows the current community conventions:
 - Relative imports use `.js`; TypeScript generates JavaScript, source maps, and declarations.
 - `dsh-plugin.json` declares the Command contract, `commands.invoke` permission, and Host facet.
 - Mediated command registration uses `ctx.get('tuiPluginHost', false)`.
-- `tuiDialogs`, `tuiCommandTrees`, and `tuiPluginHost` are optional capabilities. Their absence degrades silently and cannot prevent dsh-TUI from starting.
+- `tuiScenes`, `tuiDialogs`, `tuiCommandTrees`, and `tuiPluginHost` are capability-probed. Missing Scene
+  support falls back to managed dialogs; missing required interfaces disables the command silently and
+  cannot prevent dsh-TUI from starting.
 - Every registration and child fiber is bound to the Cordis lifecycle and cleaned up on unload.
 
-dsh-TUI 0.9.2 through 0.9.3 provide the managed dialog and mediated command APIs used by this plugin;
-the current build and runtime baseline is 0.9.3. A regular Cordis Loader row does not necessarily bind a
+dsh-TUI 0.9.3 provides the Scene API used by the full-screen interface, while 0.9.2 uses the
+managed-dialog fallback. Both provide the mediated command API; the current build and runtime baseline
+is 0.9.3. A regular Cordis Loader row does not necessarily bind a
 Component identity. The package falls back to legacy `commands.register` only when the host explicitly
 returns `COMPONENT_NOT_ADMITTED`; permission denials, manifest incompatibility, and other admission errors
 are not bypassed by the fallback.
@@ -199,7 +222,8 @@ Build output:
 lib/types/index.js         Cordis root entry
 lib/types/plugin.js        File manager service and TUI integration
 lib/types/server/index.js  Credential-aware per-server adapter
-lib/types/tui/index.js     Managed dialog and /mcp-manager command
+lib/types/tui/index.js     /mcp-manager registration and managed-dialog fallback
+lib/types/tui/scene.js     Native full-screen Scene
 ```
 
 Repository layout:
@@ -212,6 +236,6 @@ src/plugin.ts           Runtime composition and lifecycle entry
 src/host/               Patch store, state projection, and configuration schema
 src/host/set-store.ts   Profile-local Set definitions and atomic file writes
 src/server/             Credential-aware MCP client adapter
-src/tui/                dsh-TUI dialog and forms
+src/tui/                dsh-TUI full-screen Scene, compatibility dialogs, and shared forms
 scripts/verify.mjs      Manifest and Cordis entry contract checks
 ```

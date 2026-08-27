@@ -79,4 +79,9 @@ export declare function clamp(index: number, length: number): number;
 export declare function nextSetId(snapshot: McpManagerSnapshot): string;
 export declare function removeLastCodePoint(value: string): string;
 export declare function navWindow(items: readonly NavItem[], selected: number, limit: number): readonly NavItem[];
+export interface IndexedWindow<T> {
+    start: number;
+    items: readonly T[];
+}
+export declare function indexedWindow<T>(items: readonly T[], selected: number, limit: number): IndexedWindow<T>;
 //# sourceMappingURL=scene-model.d.ts.map

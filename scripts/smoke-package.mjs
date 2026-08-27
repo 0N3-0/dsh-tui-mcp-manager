@@ -96,6 +96,11 @@ try {
     'README.md',
     'README_EN.md',
     'LICENSE',
+    'docs/images/mcp-manager-sets.png',
+    'docs/images/mcp-manager-servers.png',
+    'docs/images/mcp-manager-tools.png',
+    'docs/images/mcp-manager-set-editor.png',
+    'docs/images/mcp-manager-server-editor.png',
     sourcePackage.main,
     sourcePackage.types,
     sourcePackage.dsh.bundle.patch,
@@ -144,7 +149,7 @@ try {
   assert.equal(importResult.serverName, 'dsh-tui-mcp-manager-server')
   assert.equal(importResult.serverApply, 'function')
 
-  console.log(`smoke-tested ${record.filename}: installed files, bundle patch, root entry, and server entry`)
+  console.log(`smoke-tested ${record.filename}: installed files, screenshots, bundle patch, root entry, and server entry`)
 } finally {
   await rm(temp, { recursive: true, force: true })
 }

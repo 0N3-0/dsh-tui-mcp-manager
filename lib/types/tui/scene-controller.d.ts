@@ -1,10 +1,9 @@
 import type { TuiSceneProps } from '@deepseek-harness-tui/dsh-tui/scenes';
 import type { McpManagerService } from '../host/manager.js';
-import { type CredentialProviderFace } from './credential-provider.js';
+import type { CredentialProviderFace } from './credential-provider.js';
 import type { McpServerView, McpSetView } from '../host/types.js';
 import { type SceneLanguage } from './scene-i18n.js';
-import { type ServerFormIntent } from './server-form-model.js';
-import { type NavItem, type SceneTab, type ServerEditorRow, type SetEditorRow, type Workspace } from './scene-model.js';
+import { type NavItem, type SceneTab, type Workspace } from './scene-model.js';
 /**
  * Own every mutable Scene concern without rendering any terminal elements.
  * Keeping this hook host-React-only prevents invalid hook calls while making
@@ -30,9 +29,9 @@ export declare function useMcpManagerSceneController(props: TuiSceneProps, manag
     error: any;
     confirm: any;
     setEditor: any;
-    setEditorRows: SetEditorRow[];
+    setEditorRows: import("./scene-model.js").SetEditorRow[];
     serverEditor: any;
-    serverEditorRows: ServerEditorRow[];
+    serverEditorRows: import("./scene-model.js").ServerEditorRow[];
     detailScrollTop: any;
     scrollDetailBy: (delta: number) => void;
     scrollDetailTo: (next: number) => void;
@@ -50,7 +49,7 @@ export declare function useMcpManagerSceneController(props: TuiSceneProps, manag
     openCreateSet: () => void;
     openEditSet: () => void;
     activateSetEditorRow: (index: number) => void;
-    openServerEditor: (intent: ServerFormIntent) => void;
+    openServerEditor: (intent: import("./server-form-model.js").ServerFormIntent) => void;
     activateServerEditorRow: (index: number) => void;
 };
 //# sourceMappingURL=scene-controller.d.ts.map
