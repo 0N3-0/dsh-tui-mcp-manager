@@ -15,10 +15,21 @@ export declare class McpManagerService extends Service {
     private readonly setStore?;
     private legacySettings?;
     private readonly records;
+    private readonly changeListeners;
     private revision;
+    private changeNotificationQueued;
     private chain;
     private lastStorage?;
     constructor(ctx: Context);
+    /**
+     * Subscribe to manager-owned state changes.
+     *
+     * Renderers still perform a low-frequency file refresh because profile files
+     * may be edited outside this process. This feed covers mutations, Loader
+     * projections, tool-registry changes, and reconnect transitions immediately.
+     */
+    subscribe(listener: () => void): () => void;
+    private bumpRevision;
     /** Register the old section read-only so an existing install can migrate once. */
     private installLegacySettingsMigration;
     private installToolRegistryTracking;

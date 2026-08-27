@@ -4,7 +4,7 @@
   "id": "com.dsh-tui.mcp-manager",
   "name": "dsh-tui-mcp-manager",
   "version": "0.1.0",
-  "description": "Native dsh-TUI dialog for managing file-backed MCP Loader rows in the active profile.",
+  "description": "Native dsh-TUI interface for managing file-backed MCP Loader rows in the active profile.",
   "facets": {
     "host": {
       "entry": "lib/types/index.js",
@@ -23,7 +23,7 @@
     {
       "name": "commands.invoke",
       "scope": "dsh-tui.mcp-manager",
-      "reason": "Open and operate the /mcp-manager dialog from dsh-TUI."
+      "reason": "Open and operate the /mcp-manager interface from dsh-TUI."
     }
   ],
   "contributes": {

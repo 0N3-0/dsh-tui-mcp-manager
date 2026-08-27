@@ -39,7 +39,71 @@ assert.match(entry, /export const Config\s*=/)
 assert.match(entry, /export function apply\s*\(/)
 assert.doesNotMatch(entry, /export default/)
 
-const { ProfileSetStore, applyActiveSetsToServers } = await import('../lib/types/host/set-store.js')
+const tuiEntry = await readFile(new URL('../lib/types/tui/index.js', import.meta.url), 'utf8')
+assert.match(tuiEntry, /tuiScenes/)
+assert.match(tuiEntry, /tuiDialogs/)
+assert.doesNotMatch(
+  tuiEntry,
+  /inject\(\[['"]tuiScenes['"]\]/,
+  'scene registration and command execution must share one Cordis activation',
+)
+assert.match(tuiEntry, /const scenes = tuiCtx\.get\?\.\(['"]tuiScenes['"], false\)/)
+const sceneEntry = await readFile(new URL('../lib/types/tui/scene.js', import.meta.url), 'utf8')
+assert.doesNotMatch(sceneEntry, /\bScrollBox\s*[,)]|ink-box/)
+assert.match(sceneEntry, /overflow: ['"]hidden['"]/)
+assert.match(sceneEntry, /top: -visibleDetailScrollTop/)
+assert.match(sceneEntry, /renderServerEditorView/)
+assert.doesNotMatch(sceneEntry, /function serverFieldLabel/)
+const serverEditorView = await readFile(new URL('../lib/types/tui/scene-server-editor.js', import.meta.url), 'utf8')
+assert.match(serverEditorView, /function serverFieldLabel/)
+assert.match(serverEditorView, /React\.createElement/)
+const managerEntry = await readFile(new URL('../lib/types/host/manager.js', import.meta.url), 'utf8')
+assert.match(managerEntry, /subscribe\(listener\)/)
+const presentation = await import('../lib/types/tui/presentation.js')
+assert.equal(presentation.runtimeStateText('zh', 'connected'), '已连接')
+assert.equal(presentation.doctorCheckStringKey('credentials'), 'doctorCredentials')
+assert.equal(presentation.doctorSuggestionStringKey('check-auth'), 'suggestCheckAuth')
+
+const serverForm = await import('../lib/types/tui/server-form-model.js')
+assert.deepEqual(serverForm.parseArgs('node "two words" --flag'), ['node', 'two words', '--flag'])
+assert.deepEqual(serverForm.parsePairs('A=one, B=two'), { A: 'one', B: 'two' })
+const emptySnapshot = {
+  revision: 0,
+  profile: { key: 'test', source: 'ctx.baseUrl' },
+  storage: { available: true, writable: true, managedBlock: true },
+  servers: [],
+  sets: [],
+  activeSetIds: [],
+}
+const httpDraft = serverForm.createServerDraft(emptySnapshot, 'create')
+Object.assign(httpDraft, {
+  id: 'context7',
+  displayName: 'Context7',
+  serverName: 'context7',
+  transport: 'streamable-http',
+  url: 'https://mcp.context7.com/mcp',
+  headers: '',
+  secretHeaders: 'api-key=CONTEXT7_API_KEY',
+  credentialValues: { CONTEXT7_API_KEY: 'not-persisted-in-loader-row' },
+})
+assert.equal(serverForm.validateServerDraft(httpDraft, emptySnapshot, 'create'), undefined)
+const httpSubmission = serverForm.buildServerSubmission(httpDraft)
+assert.deepEqual(httpSubmission.record.secretHeaders, {
+  'api-key': { ref: 'CONTEXT7_API_KEY' },
+})
+assert.equal(JSON.stringify(httpSubmission.record).includes('not-persisted-in-loader-row'), false)
+assert.deepEqual(httpSubmission.credentialValues, {
+  CONTEXT7_API_KEY: 'not-persisted-in-loader-row',
+})
+httpDraft.headers = 'api-key=plain-text-secret'
+assert.equal(serverForm.validateServerDraft(httpDraft, emptySnapshot, 'create'), 'plain-secret-headers')
+httpDraft.headers = ''
+
+const {
+  ProfileSetStore,
+  applyActiveSetsToServers,
+  removeServerFromSets,
+} = await import('../lib/types/host/set-store.js')
 const temp = await mkdtemp(join(tmpdir(), 'dsh-tui-mcp-manager-'))
 try {
   const store = new ProfileSetStore(join(temp, 'mcp-manager.sets.yml'))
@@ -51,6 +115,9 @@ try {
   assert.deepEqual(stored.sets.map((set) => set.id), ['research', 'extra'])
   assert.deepEqual(stored.activeSetIds, ['research', 'extra'])
   assert.equal(stored.initialized, true)
+  const withoutShared = removeServerFromSets(stored.sets, 'shared')
+  assert.deepEqual(withoutShared.map((set) => set.serverIds), [['context7'], ['ghgrep']])
+  assert.equal(stored.sets.every((set) => set.serverIds.includes('shared')), true, 'server removal must not mutate the input Sets')
 
   const servers = [
     { id: 'context7', enabled: false },

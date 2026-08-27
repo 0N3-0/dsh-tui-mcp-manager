@@ -75,6 +75,14 @@ export function applyActiveSetsToServers(
   }))
 }
 
+/** Remove one server membership from every Set without mutating the input. */
+export function removeServerFromSets(sets: ManagedSetRecord[], serverId: string): ManagedSetRecord[] {
+  return sets.map((set) => ({
+    ...set,
+    serverIds: set.serverIds.filter((id) => id !== serverId),
+  }))
+}
+
 function parseDocument(content: string, filename: string): SetDocument {
   let parsed: unknown
   try {

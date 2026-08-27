@@ -13,7 +13,13 @@ import {
 } from './schema.js'
 import { detectProfile, type ProfileIdentity } from './profile.js'
 import { loaderRowId, ProfilePatchStore, toLoaderEntry, type PatchStoreSnapshot } from './patch-store.js'
-import { applyActiveSetsToServers, normalizeSetRecord, ProfileSetStore, type SetStoreSnapshot } from './set-store.js'
+import {
+  applyActiveSetsToServers,
+  normalizeSetRecord,
+  ProfileSetStore,
+  removeServerFromSets,
+  type SetStoreSnapshot,
+} from './set-store.js'
 import {
   ManagerError,
   type CredentialStateView,
@@ -89,7 +95,9 @@ export class McpManagerService extends Service {
   private readonly setStore?: ProfileSetStore
   private legacySettings?: SettingsScope<unknown>
   private readonly records = new Map<string, RuntimeRecord>()
+  private readonly changeListeners = new Set<() => void>()
   private revision = 0
+  private changeNotificationQueued = false
   private chain: Promise<void> = Promise.resolve()
   private lastStorage?: PatchStoreSnapshot
 
@@ -105,6 +113,34 @@ export class McpManagerService extends Service {
   }
 
   // ── wiring ────────────────────────────────────────────────────────────────
+
+  /**
+   * Subscribe to manager-owned state changes.
+   *
+   * Renderers still perform a low-frequency file refresh because profile files
+   * may be edited outside this process. This feed covers mutations, Loader
+   * projections, tool-registry changes, and reconnect transitions immediately.
+   */
+  subscribe(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => this.changeListeners.delete(listener)
+  }
+
+  private bumpRevision(): void {
+    this.revision += 1
+    if (this.changeNotificationQueued) return
+    this.changeNotificationQueued = true
+    queueMicrotask(() => {
+      this.changeNotificationQueued = false
+      for (const listener of this.changeListeners) {
+        try {
+          listener()
+        } catch (error) {
+          this.ctx.logger?.warn?.('mcp-manager change listener failed: %s', errorText(error))
+        }
+      }
+    })
+  }
 
   /** Register the old section read-only so an existing install can migrate once. */
   private installLegacySettingsMigration(): void {
@@ -250,7 +286,7 @@ export class McpManagerService extends Service {
   ): Promise<SetStoreSnapshot> {
     if (this.setStore === undefined) throw new ManagerError('active profile path is unavailable', { code: 'profile-unavailable' })
     const snapshot = await this.setStore.write(sets, activeSetIds)
-    this.revision += 1
+    this.bumpRevision()
     return snapshot
   }
 
@@ -302,7 +338,7 @@ export class McpManagerService extends Service {
     for (const id of [...this.records.keys()]) {
       if (!ids.has(id)) {
         this.records.delete(id)
-        this.revision += 1
+        this.bumpRevision()
       }
     }
 
@@ -319,7 +355,7 @@ export class McpManagerService extends Service {
           updatedAt: Date.now(),
         }
         this.records.set(config.id, record)
-        this.revision += 1
+        this.bumpRevision()
       } else if (record.fingerprint !== fingerprint) {
         record.config = config
         record.fingerprint = fingerprint
@@ -358,7 +394,7 @@ export class McpManagerService extends Service {
 
   private touch(record: RuntimeRecord): void {
     record.updatedAt = Date.now()
-    this.revision += 1
+    this.bumpRevision()
   }
 
   private toolsFor(serverName: string): McpToolView[] {
@@ -586,9 +622,19 @@ export class McpManagerService extends Service {
         const id = stringField(payload, 'id')
         await this.enqueue(async () => {
           const storage = await this.readStorage()
-          const written = await this.writeServers(storage.servers.filter((server) => server.id !== id))
-          const sets = await this.readSets(new Set(written.servers.map((server) => server.id)))
-          await this.writeSets(sets.sets, sets.activeSetIds)
+          if (!storage.servers.some((server) => server.id === id)) {
+            throw new ManagerError(`server ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+          }
+          const known = new Set(storage.servers.map((server) => server.id))
+          const sets = await this.readSets(known)
+          const remainingSets = removeServerFromSets(sets.sets, id)
+          const remainingServers = applyActiveSetsToServers(
+            storage.servers.filter((server) => server.id !== id),
+            remainingSets,
+            sets.activeSetIds,
+          )
+          const written = await this.writeServers(remainingServers)
+          await this.writeSets(remainingSets, sets.activeSetIds)
           await this.syncFromFile(written)
         })
         return this.snapshot()

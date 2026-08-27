@@ -3,10 +3,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
-import { credentialRef, type CredentialInfo } from '@deepseek-ai/dsh-credentials'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { TuiDialogRuntime } from '@deepseek-harness-tui/dsh-tui/extensions'
 import type { TuiPluginHost } from '@deepseek-harness-tui/dsh-tui/plugin-host'
+import type { TuiSceneRuntime } from '@deepseek-harness-tui/dsh-tui/scenes'
 import type { McpManagerService } from '../host/manager.js'
+import { persistCredentialValues, type CredentialProviderFace } from './credential-provider.js'
+import { createMcpManagerScene } from './scene.js'
 import type {
   ManagedSetRecord,
   ManagedServerRecord,
@@ -15,8 +18,31 @@ import type {
   McpServerView,
   McpSetView,
   McpToolView,
-  SecretHeaderRef,
 } from '../host/types.js'
+import {
+  doctorCheckStringKey,
+  doctorSuggestionStringKey,
+  runtimeStateText,
+} from './presentation.js'
+import {
+  formatArgs,
+  formatEquals,
+  formatSecretHeaders,
+  hasPlainSecretEnv,
+  hasPlainSecretHeader,
+  isCredentialRefMap,
+  isPairMap,
+  isSecretHeaderMap,
+  nextDuplicateId,
+  nextDuplicateServerName,
+  nextServerId,
+  parseArgs,
+  parseAssignments,
+  parseCredentialRefs,
+  parsePairs,
+  parseSecretHeaders,
+} from './server-form-model.js'
+import { nextSetId } from './scene-model.js'
 
 export const name = 'dsh-tui-mcp-manager-dialog'
 
@@ -39,11 +65,6 @@ interface IconSet {
 
 type TuiDialogs = Pick<TuiDialogRuntime, 'input' | 'select' | 'confirm'>
 
-interface CredentialProviderFace {
-  describe(ref: ReturnType<typeof credentialRef>): Promise<CredentialInfo>
-  set(ref: ReturnType<typeof credentialRef>, value: string): Promise<void>
-}
-
 interface ServerFormSubmission {
   record: ManagedServerRecord
   credentialValues: Record<string, string>
@@ -51,6 +72,7 @@ interface ServerFormSubmission {
 
 const DIALOG_TIMEOUT_MS = 10 * 60_000
 const PLUGIN_LOADED_AT = Date.now()
+const SCENE_ID = 'dsh-tui-mcp-manager'
 
 // Match dsh-TUI's own figures: standard Unicode only, with no private-use,
 // emoji, font probing, or alternate icon modes.
@@ -482,28 +504,47 @@ export async function resolveTuiLanguage(ctx: any): Promise<UiLang> {
 }
 
 export function applyTui(ctx: Context): void {
+  // Keep scene registration and command execution in the same activation.
+  // dsh-TUI deliberately scopes a scene to the activation that registered it;
+  // registering from a second ctx.inject() makes open() reject the command as
+  // a cross-activation access. tuiScenes remains a soft probe so 0.9.2 can
+  // still register the command and use the managed-dialog fallback.
   ctx.inject(['tuiDialogs'], (tuiCtx: any) => {
     const dialogs = tuiCtx.get?.('tuiDialogs', false) as TuiDialogs | undefined
     const manager = tuiCtx.get?.('mcpManager', false) as McpManagerService | undefined
     const credentials = tuiCtx.get?.('credentials', false) as CredentialProviderFace | undefined
-    if (!dialogs || !manager || !credentials) {
-      debug(`inactive: dialogs=${Boolean(dialogs)} manager=${Boolean(manager)} credentials=${Boolean(credentials)}`)
+    if (!dialogs || !manager) {
+      debug(`command inactive: dialogs=${Boolean(dialogs)} manager=${Boolean(manager)}`)
       return
+    }
+
+    const scenes = tuiCtx.get?.('tuiScenes', false) as TuiSceneRuntime | undefined
+    if (scenes) {
+      tuiCtx.effect(() => scenes.register({
+        id: SCENE_ID,
+        title: 'MCP Manager',
+        component: createMcpManagerScene(manager, () => resolveTuiLanguage(tuiCtx), credentials),
+      }, tuiCtx))
+      debug('scene registered in command activation')
+    } else {
+      debug('scene inactive: tuiScenes is unavailable; using dialog fallback')
     }
 
     tuiCtx.effect(() => {
       const disposeTree = tuiCtx.get?.('tuiCommandTrees', false)?.register?.({
         root: 'mcp-manager',
         descriptions: {
-          zh: '打开原生 MCP 服务器管理浮窗',
-          en: 'Open the native MCP server manager dialog',
+          zh: '打开 MCP 服务器管理器',
+          en: 'Open the MCP server manager',
         },
         children: () => [],
       })
       const definition: CommandDefinition = {
         name: 'mcp-manager',
-        description: 'Open the native MCP server manager dialog',
+        description: 'Open the MCP server manager',
         handler: async () => {
+          if (scenes?.open(SCENE_ID)) return { kind: 'success' as const }
+          if (!credentials) throw new Error('dsh-tui-mcp-manager: credentials service is required by the dialog fallback')
           await runManager(tuiCtx, dialogs, manager, credentials, ICONS)
           return { kind: 'success' as const }
         },
@@ -1137,32 +1178,8 @@ function doctorCheckValue(lang: UiLang, check: McpDoctorCheck): string {
   return check.detail
 }
 
-function runtimeStateText(lang: UiLang, state: McpServerView['state']): string {
-  const runtime: Record<McpServerView['state'], { zh: string; en: string }> = {
-    connected: { zh: '已连接', en: 'connected' },
-    starting: { zh: '正在启动', en: 'starting' },
-    reconnecting: { zh: '正在重连', en: 'reconnecting' },
-    failed: { zh: '连接失败', en: 'failed' },
-    stopped: { zh: '已停止', en: 'stopped' },
-    disabled: { zh: '已停用', en: 'disabled' },
-  }
-  return runtime[state]?.[lang] ?? state
-}
-
 function doctorSuggestion(lang: UiLang, suggestion: NonNullable<McpDoctorCheck['suggestion']>): string {
-  const keys: Record<NonNullable<McpDoctorCheck['suggestion']>, CopyKey> = {
-    'fix-permissions': 'suggestFixPermissions',
-    'reload-profile': 'suggestReloadProfile',
-    'edit-command': 'suggestEditCommand',
-    'edit-url': 'suggestEditUrl',
-    'edit-cwd': 'suggestEditCwd',
-    'set-credentials': 'suggestSetCredentials',
-    'check-auth': 'suggestCheckAuth',
-    'check-network': 'suggestCheckNetwork',
-    'reconnect-runtime': 'suggestReconnectRuntime',
-    'wait-runtime': 'suggestWaitRuntime',
-  }
-  return copy(lang, keys[suggestion])
+  return copy(lang, doctorSuggestionStringKey(suggestion))
 }
 
 function doctorStateIcon(state: 'pass' | 'warn' | 'fail', icons: IconSet): string {
@@ -1171,18 +1188,8 @@ function doctorStateIcon(state: 'pass' | 'warn' | 'fail', icons: IconSet): strin
   return icons.remove
 }
 
-function doctorCheckLabel(lang: UiLang, id: string): string {
-  const keys: Record<string, CopyKey> = {
-    storage: 'doctorStorage',
-    loader: 'doctorLoader',
-    target: 'doctorTarget',
-    cwd: 'doctorCwd',
-    credentials: 'doctorCredentials',
-    runtime: 'doctorRuntime',
-    tools: 'doctorTools',
-  }
-  const key = keys[id]
-  return key ? copy(lang, key) : id
+function doctorCheckLabel(lang: UiLang, id: McpDoctorCheck['id']): string {
+  return copy(lang, doctorCheckStringKey(id))
 }
 
 async function runInspector(
@@ -1867,15 +1874,6 @@ async function askForServer(
   }
 }
 
-async function persistCredentialValues(
-  credentials: CredentialProviderFace,
-  values: Record<string, string>,
-): Promise<void> {
-  for (const [ref, value] of Object.entries(values)) {
-    await credentials.set(credentialRef(ref), value)
-  }
-}
-
 async function ask(
   dialogs: TuiDialogs,
   title: string,
@@ -2007,161 +2005,5 @@ function isWideCodePoint(codePoint: number): boolean {
   )
 }
 
-function nextServerId(snapshot: McpManagerSnapshot): string {
-  const existing = new Set(snapshot.servers.map((server) => server.id))
-  let index = 1
-  while (existing.has(`mcp-${index}`)) index += 1
-  return `mcp-${index}`
-}
-
-function nextSetId(snapshot: McpManagerSnapshot): string {
-  const existing = new Set(snapshot.sets.map((set) => set.id))
-  for (let index = 1; ; index += 1) {
-    const candidate = `set-${index}`
-    if (!existing.has(candidate)) return candidate
-  }
-}
-
-function nextDuplicateId(snapshot: McpManagerSnapshot, source: string): string {
-  const existing = new Set(snapshot.servers.map((server) => server.id))
-  for (let index = 1; ; index += 1) {
-    const suffix = index === 1 ? '-copy' : `-copy-${index}`
-    const candidate = `${source.slice(0, 64 - suffix.length)}${suffix}`
-    if (!existing.has(candidate)) return candidate
-  }
-}
-
-function nextDuplicateServerName(snapshot: McpManagerSnapshot, source: string): string {
-  const existing = new Set(snapshot.servers.map((server) => server.serverName))
-  for (let index = 1; ; index += 1) {
-    const suffix = index === 1 ? '_copy' : `_copy${index}`
-    const candidate = `${source.slice(0, 32 - suffix.length)}${suffix}`
-    if (!existing.has(candidate)) return candidate
-  }
-}
-
-const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/
-const PLAIN_SECRET_HEADER = /^(authorization|proxy-authorization|cookie|api-key|x-api-key|x-auth-token)$/i
-const PLAIN_SECRET_ENV = /(?:^|_)(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH)(?:$|_)|^AUTH/i
-
-function parseAssignments(value: string): Array<[string, string]> | undefined {
-  const result: Array<[string, string]> = []
-  for (const raw of value.split(/[\n,;]+/)) {
-    const part = raw.trim()
-    if (part === '') continue
-    const index = part.indexOf('=')
-    if (index <= 0) return undefined
-    const name = part.slice(0, index).trim()
-    const item = part.slice(index + 1).trim()
-    if (name === '' || item === '') return undefined
-    result.push([name, item])
-  }
-  return result
-}
-
-function isPairMap(value: string): boolean {
-  return value.trim() === '' || parseAssignments(value) !== undefined
-}
-
-function parsePairs(value: string): Record<string, string> {
-  return Object.fromEntries(parseAssignments(value) ?? [])
-}
-
-function hasPlainSecretHeader(value: string): boolean {
-  return (parseAssignments(value) ?? []).some(([name]) => PLAIN_SECRET_HEADER.test(name))
-}
-
-function hasPlainSecretEnv(value: string): boolean {
-  return (parseAssignments(value) ?? []).some(([name]) => PLAIN_SECRET_ENV.test(name))
-}
-
-function isCredentialRefMap(value: string): boolean {
-  const entries = parseAssignments(value)
-  return entries !== undefined && entries.every(([, ref]) => CREDENTIAL_REF.test(ref))
-}
-
-function parseCredentialRefs(value: string): Record<string, string> {
-  return Object.fromEntries(parseAssignments(value) ?? [])
-}
-
-function formatEquals(value?: Record<string, string>): string {
-  return Object.entries(value ?? {})
-    .map(([key, item]) => `${key}=${item}`)
-    .join(', ')
-}
-
-/**
- * Parse one compact, shell-like secret-header entry:
- *
- *   Authorization=Bearer AUTH_TOKEN_REF
- *   X-API-Key=SERVICE_API_KEY
- *
- * The final token is always a credential reference. Everything before it,
- * including the separating whitespace, is the literal prefix. Requiring a
- * whitespace boundary for prefixed values keeps a pasted API key from being
- * split into a seemingly valid reference plus a persisted secret prefix.
- */
-function parseSecretHeaderSpec(spec: string): SecretHeaderRef | undefined {
-  if (CREDENTIAL_REF.test(spec)) return { ref: spec }
-  const prefixed = spec.match(/^(.+\s)([A-Za-z_][A-Za-z0-9_]*)$/s)
-  return prefixed ? { ref: prefixed[2], prefix: prefixed[1] } : undefined
-}
-
-function isSecretHeaderMap(value: string): boolean {
-  const entries = parseAssignments(value)
-  return entries !== undefined && entries.every(([, spec]) => parseSecretHeaderSpec(spec) !== undefined)
-}
-
-function parseSecretHeaders(value: string): Record<string, SecretHeaderRef> {
-  return Object.fromEntries(
-    (parseAssignments(value) ?? []).map(([name, spec]) => [name, parseSecretHeaderSpec(spec)!]),
-  )
-}
-
-function formatSecretHeaders(value?: Record<string, SecretHeaderRef>): string {
-  return Object.entries(value ?? {})
-    .map(([key, entry]) => `${key}=${entry.prefix ?? ''}${entry.ref}`)
-    .join(', ')
-}
-
-function parseArgs(value: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let quote: '"' | "'" | undefined
-  let escaped = false
-  let started = false
-  for (const character of value) {
-    if (escaped) {
-      current += character
-      escaped = false
-      started = true
-    } else if (character === '\\' && quote !== "'") {
-      escaped = true
-      started = true
-    } else if (quote) {
-      if (character === quote) quote = undefined
-      else current += character
-    } else if (character === '"' || character === "'") {
-      quote = character
-      started = true
-    } else if (/\s/.test(character)) {
-      if (started) result.push(current)
-      current = ''
-      started = false
-    } else {
-      current += character
-      started = true
-    }
-  }
-  if (escaped) current += '\\'
-  if (started) result.push(current)
-  return result
-}
-
-function formatArgs(value?: string[]): string {
-  return (value ?? [])
-    .map((item) => (item === '' || /[\s"'\\]/.test(item) ? JSON.stringify(item) : item))
-    .join(' ')
-}
 
 export type { McpManagerService }
