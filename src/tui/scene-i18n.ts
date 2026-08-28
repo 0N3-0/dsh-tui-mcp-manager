@@ -11,7 +11,6 @@ export type SceneLanguage = 'zh' | 'en'
 const STRINGS = {
   en: {
     title: 'MCP Manager',
-    subtitle: 'Full-screen preview',
     servers: 'MCP SERVER POOL',
     sets: 'MCP SETS',
     noServers: 'No managed MCP servers',
@@ -160,7 +159,6 @@ const STRINGS = {
   },
   zh: {
     title: 'MCP 管理器',
-    subtitle: '全屏预览版',
     servers: 'MCP 服务器池',
     sets: 'MCP 集合',
     noServers: '当前没有托管的 MCP 服务器',

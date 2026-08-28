@@ -4,7 +4,6 @@ export type SceneLanguage = 'zh' | 'en';
 declare const STRINGS: {
     readonly en: {
         readonly title: "MCP Manager";
-        readonly subtitle: "Full-screen preview";
         readonly servers: "MCP SERVER POOL";
         readonly sets: "MCP SETS";
         readonly noServers: "No managed MCP servers";
@@ -153,7 +152,6 @@ declare const STRINGS: {
     };
     readonly zh: {
         readonly title: "MCP 管理器";
-        readonly subtitle: "全屏预览版";
         readonly servers: "MCP 服务器池";
         readonly sets: "MCP 集合";
         readonly noServers: "当前没有托管的 MCP 服务器";

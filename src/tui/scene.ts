@@ -373,7 +373,6 @@ export function createMcpManagerScene(
         Box,
         { flexDirection: 'row', height: 1, flexShrink: 0, alignItems: 'center' },
         h(Text, { bold: true, color: 'permission' }, text(lang, 'title')),
-        h(Text, { color: 'subtle' }, `  ${text(lang, 'subtitle')}`),
         h(Box, { flexGrow: 1 }),
         snapshot !== undefined && h(Text, { color: 'subtle' },
           `${snapshot.profile.key}  ${ready}/${snapshot.servers.length} ${text(lang, 'ready')}  ${toolCount} ${text(lang, 'toolCount')}`,
