@@ -7,6 +7,8 @@ import * as yaml from 'js-yaml'
 
 const manifest = JSON.parse(await readFile(new URL('../dsh-plugin.json', import.meta.url), 'utf8'))
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const publishWorkflowText = await readFile(new URL('../.github/workflows/publish.yml', import.meta.url), 'utf8')
+const publishWorkflow = yaml.load(publishWorkflowText)
 
 assert.equal(manifest.$schema, 'https://dsh.community/schemas/dsh-plugin-0.15.json')
 assert.equal(manifest.manifestVersion, '0.15')
@@ -25,8 +27,21 @@ assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
 assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.3')
 assert.equal(pkg.scripts.prepare, undefined)
 assert.equal(pkg.scripts.prepack, 'npm run check')
+assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs')
 for (const required of ['lib', 'cordis.patch.yml', 'dsh-plugin.json', 'README.md', 'README_EN.md', 'LICENSE']) {
   assert.ok(pkg.files.includes(required), `package files must include ${required}`)
+}
+
+assert.deepEqual(publishWorkflow.on.release.types, ['published'])
+assert.equal(publishWorkflow.permissions.contents, 'read')
+assert.equal(publishWorkflow.permissions['id-token'], 'write')
+assert.equal(publishWorkflow.jobs.npm['runs-on'], 'ubuntu-latest')
+assert.match(publishWorkflowText, /npm publish --access public/)
+assert.doesNotMatch(publishWorkflowText, /NODE_AUTH_TOKEN|NPM_TOKEN/)
+const workflowScripts = [...publishWorkflowText.matchAll(/npm run ([A-Za-z0-9:_-]+)/g)].map((match) => match[1])
+assert.deepEqual([...new Set(workflowScripts)], ['verify:release', 'check', 'smoke:package'])
+for (const script of workflowScripts) {
+  assert.equal(typeof pkg.scripts[script], 'string', `publish workflow references missing npm script ${script}`)
 }
 
 const patch = yaml.load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'))
@@ -71,6 +86,12 @@ const serverEditorController = await import('../lib/types/tui/scene-server-edito
 const setEditorController = await import('../lib/types/tui/scene-set-editor-controller.js')
 assert.match(sceneControllerEntry, /useSetEditorController/)
 assert.doesNotMatch(sceneControllerEntry, /invalidSetId|function moveSetEditorSelection/)
+assert.match(sceneControllerEntry, /setNotice\(announcement\)/)
+assert.match(sceneControllerEntry, /\}, \[manager\]\)/)
+const sceneStartOffset = sceneControllerEntry.indexOf('const start = async')
+const initialRefreshOffset = sceneControllerEntry.indexOf('await refresh()', sceneStartOffset)
+const subscribeOffset = sceneControllerEntry.indexOf('manager.subscribe', sceneStartOffset)
+assert.ok(sceneStartOffset >= 0 && initialRefreshOffset > sceneStartOffset && subscribeOffset > initialRefreshOffset)
 const managerEntry = await readFile(new URL('../lib/types/host/manager.js', import.meta.url), 'utf8')
 assert.match(managerEntry, /subscribe\(listener\)/)
 const presentation = await import('../lib/types/tui/presentation.js')
@@ -216,15 +237,27 @@ try {
       failOnStartupError: false,
       reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30_000, maxAttempts: 10 },
     }
-    await externalPatchStore.write([server])
+    const companionServer = {
+      ...server,
+      id: 'companion',
+      name: 'Companion',
+      serverName: 'companion',
+    }
+    await externalPatchStore.write([server, companionServer])
 
     const ctx = new Context().extend({ baseUrl: pathToFileURL(`${profileDir}/`).href })
-    ctx.provide('tools', { schemas: () => [] })
+    let toolSchemaReads = 0
+    ctx.provide('tools', { schemas: () => {
+      toolSchemaReads += 1
+      return []
+    } })
     ctx.provide('loader', { entries: () => [] })
     const manager = new McpManagerService(ctx)
     const beforeExternalEdit = await manager.invoke('list', {})
     assert.equal(beforeExternalEdit.profile.key, 'external-edit')
     assert.equal(beforeExternalEdit.servers[0]?.name, 'Before external edit')
+    assert.equal(beforeExternalEdit.servers.length, 2)
+    assert.equal(toolSchemaReads, 2, 'each manager projection must reuse one tool-registry snapshot across servers')
 
     await new ProfilePatchStore(patchPath).write([{
       ...server,

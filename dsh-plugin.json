@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "com.dsh-tui.mcp-manager",
   "name": "dsh-tui-mcp-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native full-screen MCP manager for dsh-TUI.",
   "facets": {
     "host": {

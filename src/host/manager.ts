@@ -159,8 +159,9 @@ export class McpManagerService extends Service {
 
   private installToolRegistryTracking(): void {
     this.ctx.on('tools/change', () => {
+      const schemas = this.ctx.tools.schemas()
       for (const record of this.records.values()) {
-        this.refreshTools(record)
+        this.refreshTools(record, schemas)
       }
     })
   }
@@ -342,6 +343,7 @@ export class McpManagerService extends Service {
       }
     }
 
+    const toolSchemas = this.ctx.tools.schemas()
     for (const config of snapshot.servers) {
       const fingerprint = stable(config)
       let record = this.records.get(config.id)
@@ -368,7 +370,7 @@ export class McpManagerService extends Service {
 
       const stateBeforeProjection = record.state
       const errorBeforeProjection = record.error
-      this.refreshTools(record)
+      this.refreshTools(record, toolSchemas)
       if (!config.enabled) {
         record.state = 'disabled'
         record.error = undefined
@@ -397,9 +399,9 @@ export class McpManagerService extends Service {
     this.bumpRevision()
   }
 
-  private toolsFor(serverName: string): McpToolView[] {
+  private toolsFor(serverName: string, schemas = this.ctx.tools.schemas()): McpToolView[] {
     const prefix = `mcp__${serverName}__`
-    return this.ctx.tools.schemas()
+    return schemas
       .filter((schema) => schema.name.startsWith(prefix))
       .map((schema) => ({
         name: schema.name,
@@ -409,8 +411,8 @@ export class McpManagerService extends Service {
   }
 
   /** Reconcile the cached view with the native registry without inventing a state transition. */
-  private refreshTools(record: RuntimeRecord): void {
-    const tools = this.toolsFor(record.config.serverName)
+  private refreshTools(record: RuntimeRecord, schemas = this.ctx.tools.schemas()): void {
+    const tools = this.toolsFor(record.config.serverName, schemas)
     if (stable(record.tools) === stable(tools)) return
     record.tools = tools
     this.touch(record)
@@ -713,21 +715,30 @@ export class McpManagerService extends Service {
     return result
   }
 
-  private async viewFor(record: RuntimeRecord): Promise<McpServerView> {
+  private async viewFor(record: RuntimeRecord, toolSchemas = this.ctx.tools.schemas()): Promise<McpServerView> {
     // Registry events can race record creation during profile startup. A
     // snapshot therefore performs one cheap authoritative reconciliation as
     // well as relying on tools/change for normal updates.
-    this.refreshTools(record)
+    this.refreshTools(record, toolSchemas)
     const config = cloneServerRecord(record.config)
+    const secretHeaderEntries = Object.entries(normalizeSecretHeaderEntries(config.secretHeaders))
+    const credentialRefs = new Set([
+      ...Object.values(config.secretEnv ?? {}),
+      ...secretHeaderEntries.map(([, entry]) => entry.ref),
+    ])
+    const [credentialEntries, secrets] = await Promise.all([
+      Promise.all([...credentialRefs].map(async (ref) => [ref, await this.credentialState(ref)] as const)),
+      record.error === undefined ? Promise.resolve([]) : this.resolvedSecrets(config),
+    ])
+    const credentialStates = new Map(credentialEntries)
     const secretEnv: McpServerView['secretEnv'] = {}
     for (const [name, ref] of Object.entries(config.secretEnv ?? {})) {
-      secretEnv[name] = { ref, credential: await this.credentialState(ref) }
+      secretEnv[name] = { ref, credential: credentialStates.get(ref)! }
     }
     const secretHeaders: McpServerView['secretHeaders'] = {}
-    for (const [name, entry] of Object.entries(normalizeSecretHeaderEntries(config.secretHeaders))) {
-      secretHeaders[name] = { ...entry, credential: await this.credentialState(entry.ref) }
+    for (const [name, entry] of secretHeaderEntries) {
+      secretHeaders[name] = { ...entry, credential: credentialStates.get(entry.ref)! }
     }
-    const secrets = record.error === undefined ? [] : await this.resolvedSecrets(config)
 
     const view: McpServerView = {
       id: config.id,
@@ -772,6 +783,7 @@ export class McpManagerService extends Service {
       active: setStorage.activeSetIds.includes(set.id),
     }))
     const activeSetIds = sets.filter((set) => set.active).map((set) => set.id)
+    const toolSchemas = this.ctx.tools.schemas()
     return {
       revision: this.revision,
       profile: { key: this.profile.key, source: this.profile.source },
@@ -781,7 +793,7 @@ export class McpManagerService extends Service {
         ...(this.store === undefined ? {} : { path: this.store.path }),
         managedBlock: storage?.hasManagedBlock ?? false,
       },
-      servers: await Promise.all([...this.records.values()].map((record) => this.viewFor(record))),
+      servers: await Promise.all([...this.records.values()].map((record) => this.viewFor(record, toolSchemas))),
       sets,
       activeSetIds,
     }

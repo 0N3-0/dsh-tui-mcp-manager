@@ -401,3 +401,17 @@ confirmation and notices, so no redundant wrapper is introduced.
   `TuiDialogRuntime` in the published TUI entry.
 - Opened `/mcp-manager` from the linked dsh-TUI 0.9.3 profile after rebuilding;
   the native Scene loaded with 3/3 servers ready and returned to chat with Esc.
+
+### 2026-08-28 — v0.1.1 release hardening
+
+- Kept the initial profile refresh stable across asynchronous language
+  resolution, then attached manager notifications only after that authoritative
+  snapshot. Opening the Scene no longer repeats the same profile read for
+  initialization changes already represented by the returned snapshot.
+- Reused one tool-registry snapshot across all servers in each projection and
+  resolved distinct credential states concurrently, reducing work on profiles
+  with many servers, tools, or credential references.
+- Kept screenshots in the repository and switched README image links to GitHub
+  raw URLs, while excluding the images from the runtime npm tarball.
+- Added release-workflow contract checks for the OIDC permission, trigger,
+  runner, npm scripts, publish command, and absence of long-lived token names.

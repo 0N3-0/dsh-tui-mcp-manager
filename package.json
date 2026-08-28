@@ -1,6 +1,6 @@
 {
   "name": "dsh-tui-mcp-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native full-screen MCP manager for dsh-TUI",
   "type": "module",
   "main": "./lib/types/index.js",
@@ -27,7 +27,6 @@
     "lib",
     "cordis.patch.yml",
     "dsh-plugin.json",
-    "docs/images",
     "README.md",
     "README_EN.md",
     "LICENSE"

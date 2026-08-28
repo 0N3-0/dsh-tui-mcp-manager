@@ -62,17 +62,17 @@ export function useMcpManagerSceneController(
     setDetailScrollTop(Math.max(0, Math.trunc(next)))
   }
 
-  const load = React.useCallback(async (announce = false): Promise<void> => {
+  const load = React.useCallback(async (announcement?: string): Promise<void> => {
     try {
       const next = await manager.invoke('list', {})
       if (!mounted.current) return
       setSnapshot(next)
       setError(undefined)
-      if (announce) setNotice(text(lang, 'refreshed'))
+      if (announcement !== undefined) setNotice(announcement)
     } catch (cause) {
       if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
     }
-  }, [lang])
+  }, [manager])
 
   React.useEffect(() => {
     mounted.current = true
@@ -83,6 +83,7 @@ export function useMcpManagerSceneController(
     let stopped = false
     let loading = false
     let refreshAgain = false
+    let unsubscribe: (() => void) | undefined
     const refresh = async (): Promise<void> => {
       if (loading) {
         refreshAgain = true
@@ -99,12 +100,20 @@ export function useMcpManagerSceneController(
       await refresh()
       if (!stopped) pollTimer = setTimeout(() => void poll(), SCENE_POLL_MS)
     }
-    const unsubscribe = manager.subscribe(() => void refresh())
-    void poll()
+    const start = async (): Promise<void> => {
+      // Initialization updates manager records and emits change notifications.
+      // Subscribe after the authoritative first snapshot so those changes do
+      // not schedule an identical second profile read on Scene open.
+      await refresh()
+      if (stopped) return
+      unsubscribe = manager.subscribe(() => void refresh())
+      pollTimer = setTimeout(() => void poll(), SCENE_POLL_MS)
+    }
+    void start()
     return () => {
       stopped = true
       mounted.current = false
-      unsubscribe()
+      unsubscribe?.()
       if (pollTimer !== undefined) clearTimeout(pollTimer)
     }
   }, [load])
@@ -528,7 +537,7 @@ export function useMcpManagerSceneController(
     }
     if (focusArea === 'navigation' && lower === 'a' && workspace === 'sets') openCreateSet()
     else if (focusArea === 'navigation' && lower === 'a' && workspace === 'servers') openServerEditor('create')
-    else if (lower === 'r') void load(true)
+    else if (lower === 'r') void load(text(lang, 'refreshed'))
   })
 
   return {
