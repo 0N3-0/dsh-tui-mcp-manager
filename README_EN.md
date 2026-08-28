@@ -49,12 +49,12 @@ Requires Node.js `^22.19 || >=24` and dsh-TUI `>=0.9.3 <0.10.0`. The current ver
 dsh-TUI 0.9.3.
 
 ```sh
-dsh plugin --profile dsh-tui add github:0N3-0/dsh-tui-mcp-manager
+dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
 dsh --profile dsh-tui
 ```
 
-The GitHub installation uses the committed `lib/types/` output directly. Users do not need to clone
-the repository, build it, run `pnpm approve-builds`, or modify the profile's `allowBuilds` setting.
+This installs the published package from npm. Regular users do not need to clone or build the repository,
+run `pnpm approve-builds`, or modify the profile's `allowBuilds` setting.
 
 In the TUI, run:
 
@@ -173,10 +173,9 @@ This repository remains independently owned and uses the unscoped package name
 `dsh-tui-mcp-manager`. This matches the [dsh-TUI ecosystem listing rules](https://github.com/dsh-tui-ecosystem/dsh-tui-ecosystem/blob/main/CONTRIBUTING.md),
 which allow authors to submit their own public GitHub repositories and allow the `npm` field to be empty.
 Listing does not require moving the repository or claiming an organization scope. The committed
-`lib/types/` output follows the template convention and lets Git URL installation work independently of
-build output on the publisher's machine. The package has no `prepare` script, so dsh's pnpm-based Git
-installation does not require users to approve a TypeScript build script. `prepack` runs the complete
-check only when a developer packages the project.
+`lib/types/` output follows the template convention and is included in the npm package. The package has
+no `prepare` script, so installing a published package does not run a TypeScript build on the user's
+machine. `prepack` runs the complete check only when a maintainer packages the project.
 
 The community manifest v0.15 remains an experimental draft. This README claims compatibility with the
 draft, not official certification. The plugin runs in the host process, and manifest permissions are
@@ -208,6 +207,11 @@ pnpm smoke:package
 `smoke:package` creates a real tarball, installs it in a temporary consumer directory, verifies that the
 root and server entries resolve and import, and checks that the bundle patch, manifest entry, and required
 runtime files are included.
+
+To release a new version, maintainers update the versions in both `package.json` and `dsh-plugin.json`,
+then publish a GitHub Release with the matching tag (for example, `v0.2.0`).
+`.github/workflows/publish.yml` reruns the release checks and publishes through npm Trusted Publishing
+with GitHub Actions OIDC, so no npm token is stored in the repository.
 
 Build output:
 

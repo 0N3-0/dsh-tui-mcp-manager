@@ -1,0 +1,44 @@
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the released revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.23.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Verify release metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: npm run verify:release -- "$RELEASE_TAG"
+      - run: npm run check
+      - name: Verify package contents
+        run: npm pack --dry-run --cache .npm-cache
+      - name: Smoke-test installed package
+        run: npm run smoke:package
+      - name: Verify committed build artifacts
+        run: git diff --exit-code -- lib/types
+      - name: Publish to npm
+        run: npm publish --access public

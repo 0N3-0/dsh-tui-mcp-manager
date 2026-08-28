@@ -41,12 +41,12 @@ Tool schema、Doctor 与 DSH credential reference。所有服务器变更直接�
 要求 Node.js `^22.19 || >=24` 与 dsh-TUI `>=0.9.3 <0.10.0`；当前验证基线是 dsh-TUI 0.9.3。
 
 ```sh
-dsh plugin --profile dsh-tui add github:0N3-0/dsh-tui-mcp-manager
+dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
 dsh --profile dsh-tui
 ```
 
-GitHub 安装直接使用仓库中已提交的 `lib/types/`，不需要 clone、构建或执行
-`pnpm approve-builds`，也不需要修改 profile 的 `allowBuilds`。
+该命令从 npm 安装正式发布包。普通用户不需要 clone 或构建仓库，也不需要执行
+`pnpm approve-builds` 或修改 profile 的 `allowBuilds`。
 
 进入 TUI 后输入：
 
@@ -160,9 +160,9 @@ dsh-TUI 0.9.3 提供本插件使用的 Scene API 与 mediated command API，也�
 本仓库保持作者独立所有权，并使用无 scope 包名 `dsh-tui-mcp-manager`；这与
 [dsh-TUI 生态收录标准](https://github.com/dsh-tui-ecosystem/dsh-tui-ecosystem/blob/main/CONTRIBUTING.md)
 允许作者提交自有公开 GitHub 仓库、`npm` 字段可为空的模式一致，不需要为了收录迁移仓库或预占组织
-scope。`lib/types/` 构建产物按模板约定纳入版本库，Git URL 安装不依赖发布者机器上已有的构建
-目录。包不提供 `prepare`，因此 dsh 通过 pnpm 安装 Git 依赖时不会要求用户批准 TypeScript 构建
-脚本；`prepack` 只负责在开发者打包时执行完整检查。
+scope。`lib/types/` 构建产物按模板约定纳入版本库，并随 npm 包发布。包不提供 `prepare`，因此
+安装正式发布包时不会在用户机器上执行 TypeScript 构建；`prepack` 只负责在发布者打包时执行
+完整检查。
 
 社区 manifest v0.15 目前仍是 experimental draft，本 README 只声明兼容该草案，不声称得到
 官方认证。插件在宿主进程内运行，manifest permissions 是审计和宿主策略提示，不是操作系统
@@ -192,6 +192,10 @@ pnpm smoke:package
 
 `smoke:package` 会创建真实 tarball，在临时 consumer 目录安装后检查 root/server 入口可
 resolve 和 import，并验证 bundle patch、manifest 入口与必要 runtime 文件都已进入包中。
+
+维护者发布新版本时，需要同步更新 `package.json` 与 `dsh-plugin.json` 的版本，并创建同名
+GitHub Release tag（例如 `v0.2.0`）。`.github/workflows/publish.yml` 会重新执行发布校验，然后
+使用 npm Trusted Publishing 的 GitHub Actions OIDC 身份发布，不在仓库中保存 npm token。
 
 构建产物：
 

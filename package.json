@@ -37,6 +37,7 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify": "node scripts/verify.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
     "check": "npm run typecheck && npm run build && npm run verify",
     "prepack": "npm run check",
     "smoke:package": "node scripts/smoke-package.mjs"

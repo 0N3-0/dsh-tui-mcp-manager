@@ -21,10 +21,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: npm run check
       - name: Verify package contents
         run: npm pack --dry-run --cache .npm-cache
       - name: Smoke-test installed package
-        run: pnpm smoke:package
+        run: npm run smoke:package
       - name: Verify committed build artifacts
         run: git diff --exit-code -- lib/types
