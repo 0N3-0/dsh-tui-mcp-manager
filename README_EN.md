@@ -3,11 +3,10 @@
 English | [中文](README.md)
 
 A native MCP server manager for [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
-Run `/mcp-manager` in the chat interface. dsh-TUI 0.9.3 opens a native full-screen MCP control center,
-while 0.9.2 hosts that expose only the dialog API automatically use the compatibility dialog. Both
-interfaces manage MCP CRUD, Sets, server duplication, tool schemas, Doctor checks, and DSH credential
-references. All server changes are written directly to the active profile's `cordis.patch.yml`; no
-additional configuration database is introduced.
+Run `/mcp-manager` in the chat interface to open a native full-screen MCP control center for MCP CRUD,
+Sets, server duplication, tool schemas, Doctor checks, and DSH credential references. All server changes
+are written directly to the active profile's `cordis.patch.yml`; no additional configuration database is
+introduced. The plugin requires dsh-TUI 0.9.3 or a newer 0.9.x release.
 
 ## Interface Preview
 
@@ -44,13 +43,10 @@ More views: [Set management](docs/images/mcp-manager-sets.png) ·
 - Aligns tables and form fields by terminal cells without depending on regular spaces surviving the host sanitizer.
 - Uses the standard Unicode symbols from dsh-TUI and does not depend on emoji or private-use fonts.
 
-On dsh-TUI 0.9.2, the compatibility interface keeps server overview, tools, Doctor, and editing in
-nested dialogs. That fallback is subject to the host's single-line and item-count limits and displays at
-most the first 98 tools; the 0.9.3 full-screen interface does not apply that truncation.
-
 ## Installation
 
-Requires Node.js `^22.19 || >=24` and dsh-TUI `0.9.x`. The current verified baseline is dsh-TUI 0.9.3.
+Requires Node.js `^22.19 || >=24` and dsh-TUI `>=0.9.3 <0.10.0`. The current verified baseline is
+dsh-TUI 0.9.3.
 
 ```sh
 dsh plugin --profile dsh-tui add github:0N3-0/dsh-tui-mcp-manager
@@ -86,7 +82,7 @@ dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 `cordis.patch.yml` is the source of truth for server configuration:
 
 ```text
-dsh-TUI full-screen Scene / managed-dialog fallback
+dsh-TUI full-screen Scene
     -> atomic update of a managed block
 $DSH_HOME/profiles/dsh-tui/cordis.patch.yml
     -> DSH patch watcher
@@ -151,9 +147,8 @@ secretHeaders:
     prefix: ''
 ```
 
-The 0.9.3 full-screen form masks credential values with bullets while they are entered. The 0.9.2
-compatibility input dialog remains single-line plain text, so the plugin warns that its input is visible.
-Neither interface exposes saved values in server summaries, profile patches, or RPC snapshots.
+The full-screen form masks credential values with bullets while they are entered. Saved values are not
+exposed in server summaries, profile patches, or RPC snapshots.
 
 ## dsh-TUI Extension Contract
 
@@ -164,17 +159,15 @@ The package follows the current community conventions:
 - Relative imports use `.js`; TypeScript generates JavaScript, source maps, and declarations.
 - `dsh-plugin.json` declares the Command contract, `commands.invoke` permission, and Host facet.
 - Mediated command registration uses `ctx.get('tuiPluginHost', false)`.
-- `tuiScenes`, `tuiDialogs`, `tuiCommandTrees`, and `tuiPluginHost` are capability-probed. Missing Scene
-  support falls back to managed dialogs; missing required interfaces disables the command silently and
-  cannot prevent dsh-TUI from starting.
+- `tuiScenes` is the only interface capability. `tuiCommandTrees` and `tuiPluginHost` are capability-
+  probed. Without the Scene API the plugin does not register an unusable command and cannot prevent
+  dsh-TUI from starting.
 - Every registration and child fiber is bound to the Cordis lifecycle and cleaned up on unload.
 
-dsh-TUI 0.9.3 provides the Scene API used by the full-screen interface, while 0.9.2 uses the
-managed-dialog fallback. Both provide the mediated command API; the current build and runtime baseline
-is 0.9.3. A regular Cordis Loader row does not necessarily bind a
-Component identity. The package falls back to legacy `commands.register` only when the host explicitly
-returns `COMPONENT_NOT_ADMITTED`; permission denials, manifest incompatibility, and other admission errors
-are not bypassed by the fallback.
+dsh-TUI 0.9.3 provides the Scene and mediated command APIs used by the plugin and is the current build and
+runtime baseline. A regular Cordis Loader row does not necessarily bind a Component identity. The package
+uses the base `commands.register` service only when the host explicitly returns `COMPONENT_NOT_ADMITTED`;
+permission denials, manifest incompatibility, and other admission errors are not bypassed.
 
 This repository remains independently owned and uses the unscoped package name
 `dsh-tui-mcp-manager`. This matches the [dsh-TUI ecosystem listing rules](https://github.com/dsh-tui-ecosystem/dsh-tui-ecosystem/blob/main/CONTRIBUTING.md),
@@ -222,7 +215,7 @@ Build output:
 lib/types/index.js         Cordis root entry
 lib/types/plugin.js        File manager service and TUI integration
 lib/types/server/index.js  Credential-aware per-server adapter
-lib/types/tui/index.js     /mcp-manager registration and managed-dialog fallback
+lib/types/tui/index.js     /mcp-manager and full-screen Scene registration
 lib/types/tui/scene.js     Native full-screen Scene
 ```
 
@@ -236,6 +229,6 @@ src/plugin.ts           Runtime composition and lifecycle entry
 src/host/               Patch store, state projection, and configuration schema
 src/host/set-store.ts   Profile-local Set definitions and atomic file writes
 src/server/             Credential-aware MCP client adapter
-src/tui/                dsh-TUI full-screen Scene, compatibility dialogs, and shared forms
+src/tui/                dsh-TUI full-screen Scene, controllers, and shared forms
 scripts/verify.mjs      Manifest and Cordis entry contract checks
 ```

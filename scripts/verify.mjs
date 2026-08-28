@@ -17,12 +17,12 @@ assert.equal(manifest.facets.host.entry, 'lib/types/index.js')
 assert.equal(manifest.contributes.commands[0].id, 'dsh-tui.mcp-manager')
 assert.equal(manifest.permissions[0].name, 'commands.invoke')
 assert.equal(manifest.permissions[0].scope, 'dsh-tui.mcp-manager')
-assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.2 <0.10.0')
+assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.3 <0.10.0')
 
 assert.equal(pkg.main, `./${manifest.facets.host.entry}`)
 assert.equal(pkg.exports['.'].import, pkg.main)
 assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.2')
+assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.3')
 assert.equal(pkg.scripts.prepare, undefined)
 assert.equal(pkg.scripts.prepack, 'npm run check')
 for (const required of ['lib', 'cordis.patch.yml', 'dsh-plugin.json', 'README.md', 'README_EN.md', 'LICENSE']) {
@@ -42,12 +42,8 @@ assert.doesNotMatch(entry, /export default/)
 
 const tuiEntry = await readFile(new URL('../lib/types/tui/index.js', import.meta.url), 'utf8')
 assert.match(tuiEntry, /tuiScenes/)
-assert.match(tuiEntry, /tuiDialogs/)
-assert.doesNotMatch(
-  tuiEntry,
-  /inject\(\[['"]tuiScenes['"]\]/,
-  'scene registration and command execution must share one Cordis activation',
-)
+assert.doesNotMatch(tuiEntry, /tuiDialogs|runManager|TuiDialogRuntime/)
+assert.match(tuiEntry, /inject\(\[['"]tuiScenes['"]\]/)
 assert.match(tuiEntry, /const scenes = tuiCtx\.get\?\.\(['"]tuiScenes['"], false\)/)
 const sceneEntry = await readFile(new URL('../lib/types/tui/scene.js', import.meta.url), 'utf8')
 const sceneControllerEntry = await readFile(new URL('../lib/types/tui/scene-controller.js', import.meta.url), 'utf8')

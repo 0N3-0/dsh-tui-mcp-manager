@@ -3,10 +3,9 @@
 [English](README_EN.md) | 中文
 
 面向 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 的原生 MCP Server 管理插件。
-在聊天界面输入 `/mcp-manager`，dsh-TUI 0.9.3 会打开原生全屏 MCP 控制台；只提供 dialog API
-的 0.9.2 会自动使用兼容浮窗。两种界面都支持 MCP CRUD、Sets、服务器复制、Tool schema、
-Doctor 与 DSH credential reference 管理。所有服务器变更直接写入当前 profile 的
-`cordis.patch.yml`，不引入额外配置数据库。
+在聊天界面输入 `/mcp-manager`，即可打开原生全屏 MCP 控制台，管理 MCP CRUD、Sets、服务器复制、
+Tool schema、Doctor 与 DSH credential reference。所有服务器变更直接写入当前 profile 的
+`cordis.patch.yml`，不引入额外配置数据库。插件要求 dsh-TUI 0.9.3 或更高的 0.9.x 版本。
 
 ## 界面预览
 
@@ -37,12 +36,9 @@ Doctor 与 DSH credential reference 管理。所有服务器变更直接写入�
 - 表格和表单字段按终端单元格对齐，不依赖普通空格通过宿主 sanitizer。
 - 图标沿用 dsh-TUI 风格的标准 Unicode 字符，不依赖 emoji 或私用区字体。
 
-在 0.9.2 兼容浮窗中，服务器概览、工具、诊断和编辑仍采用逐层 dialog。该 fallback 受宿主
-单行与数量上限约束，工具列表最多展示前 98 项；0.9.3 的全屏界面没有这项截断。
-
 ## 安装
 
-要求 Node.js `^22.19 || >=24` 与 dsh-TUI `0.9.x`；当前验证基线是 dsh-TUI 0.9.3。
+要求 Node.js `^22.19 || >=24` 与 dsh-TUI `>=0.9.3 <0.10.0`；当前验证基线是 dsh-TUI 0.9.3。
 
 ```sh
 dsh plugin --profile dsh-tui add github:0N3-0/dsh-tui-mcp-manager
@@ -78,7 +74,7 @@ dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 `cordis.patch.yml` 是服务器配置的唯一事实源：
 
 ```text
-dsh-TUI full-screen Scene / managed-dialog fallback
+dsh-TUI full-screen Scene
     -> atomic update of a managed block
 $DSH_HOME/profiles/dsh-tui/cordis.patch.yml
     -> DSH patch watcher
@@ -140,9 +136,8 @@ secretHeaders:
     prefix: ''
 ```
 
-0.9.3 全屏表单用圆点遮蔽正在输入的 credential value；0.9.2 兼容 input dialog 仍是单行明文，
-插件会提示输入过程可见。两种界面保存后的服务器总览、profile patch 和 RPC snapshot 都不会
-显示真实值。
+全屏表单用圆点遮蔽正在输入的 credential value；保存后的服务器总览、profile patch 和 RPC
+snapshot 都不会显示真实值。
 
 ## dsh-TUI 扩展契约
 
@@ -153,14 +148,14 @@ secretHeaders:
 - 相对导入使用 `.js`，TypeScript 生成 JS、source map 与 declaration。
 - `dsh-plugin.json` 声明 Command contract、`commands.invoke` 权限与 Host facet。
 - 通过 `ctx.get('tuiPluginHost', false)` 使用 mediated command registration。
-- `tuiScenes`、`tuiDialogs`、`tuiCommandTrees` 和 `tuiPluginHost` 都按能力探测；没有 Scene API
-  时回退 managed dialog，缺少必要接口时静默停用，不能阻止 TUI 启动。
+- `tuiScenes` 是唯一界面能力；`tuiCommandTrees` 和 `tuiPluginHost` 按能力探测。缺少 Scene API
+  时不注册不可用的命令，也不能阻止 TUI 启动。
 - 每个注册和子 fiber 都绑定 Cordis 生命周期并在卸载时清理。
 
-dsh-TUI 0.9.3 提供本插件使用的 Scene API，0.9.2 使用 managed-dialog fallback；两者都提供
-mediated command API，当前构建和运行验证基线为 0.9.3。普通 Cordis Loader row 尚不一定自动绑定
-Component identity。只有宿主明确返回 `COMPONENT_NOT_ADMITTED` 时，本包才退化到旧的
-`commands.register`；权限拒绝、manifest 不兼容或其他 admission 错误不会被 fallback 绕过。
+dsh-TUI 0.9.3 提供本插件使用的 Scene API 与 mediated command API，也是当前构建和运行验证
+基线。普通 Cordis Loader row 尚不一定自动绑定 Component identity。只有宿主明确返回
+`COMPONENT_NOT_ADMITTED` 时，本包才改用基础 `commands.register`；权限拒绝、manifest 不兼容
+或其他 admission 错误不会绕过。
 
 本仓库保持作者独立所有权，并使用无 scope 包名 `dsh-tui-mcp-manager`；这与
 [dsh-TUI 生态收录标准](https://github.com/dsh-tui-ecosystem/dsh-tui-ecosystem/blob/main/CONTRIBUTING.md)
@@ -204,7 +199,7 @@ resolve 和 import，并验证 bundle patch、manifest 入口与必要 runtime �
 lib/types/index.js         Cordis 根入口
 lib/types/plugin.js        文件管理服务与 TUI 接入
 lib/types/server/index.js  credential-aware 单服务器适配器
-lib/types/tui/index.js     /mcp-manager 注册与 managed-dialog fallback
+lib/types/tui/index.js     /mcp-manager 与全屏 Scene 注册
 lib/types/tui/scene.js     原生全屏 Scene
 ```
 
@@ -218,6 +213,6 @@ src/plugin.ts           运行时组合与生命周期入口
 src/host/               patch store、状态投影和配置 schema
 src/host/set-store.ts   profile-local Set 定义与原子文件写入
 src/server/             credential-aware MCP client 适配器
-src/tui/                dsh-TUI 全屏 Scene、兼容浮窗和共享表单
+src/tui/                dsh-TUI 全屏 Scene、控制器和共享表单
 scripts/verify.mjs      manifest 与 Cordis 入口契约检查
 ```

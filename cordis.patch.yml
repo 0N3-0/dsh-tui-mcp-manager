@@ -1,5 +1,5 @@
 # dsh-tui-mcp-manager bundle layer. The single root entry owns the file-backed
-# manager service and soft-probes dsh-TUI's managed dialog/command services.
+# manager service and registers its native dsh-TUI Scene and command.
 - insert:
     - id: dsh-tui-mcp-manager
       name: 'dsh-tui-mcp-manager'

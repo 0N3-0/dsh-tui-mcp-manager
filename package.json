@@ -1,7 +1,7 @@
 {
   "name": "dsh-tui-mcp-manager",
   "version": "0.1.0",
-  "description": "Native full-screen MCP manager for dsh-TUI with a managed-dialog fallback",
+  "description": "Native full-screen MCP manager for dsh-TUI",
   "type": "module",
   "main": "./lib/types/index.js",
   "types": "./lib/types/index.d.ts",
@@ -77,7 +77,7 @@
     "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6 || ^0.1.1-rc.1",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.1.1-rc.1",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-harness-tui/dsh-tui": "^0.9.2"
+    "@deepseek-harness-tui/dsh-tui": "^0.9.3"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -100,6 +100,6 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "4.3.1"
   }
 }
