@@ -100,6 +100,7 @@ export class McpManagerService extends Service {
   private changeNotificationQueued = false
   private chain: Promise<void> = Promise.resolve()
   private lastStorage?: PatchStoreSnapshot
+  private readonly temporarilyStoppedIds = new Set<string>()
 
   constructor(ctx: Context) {
     super(ctx, 'mcpManager')
@@ -170,7 +171,9 @@ export class McpManagerService extends Service {
     ;(this.ctx as any).on('hmr/config-update-failed', (filename: string, error: Error) => {
       if (this.store === undefined || resolve(filename) !== resolve(this.store.path)) return
       for (const record of this.records.values()) {
-        if (this.entryMatches(record.config, this.loaderEntry(record.id))) continue
+        const entry = this.loaderEntry(record.id)
+        if (this.entryMatches(record.config, entry)) continue
+        if (this.temporarilyStoppedIds.has(record.id) && this.entryMatches(record.config, entry, true)) continue
         record.state = 'failed'
         record.error = `DSH could not apply cordis.patch.yml: ${errorText(error)}`
         this.touch(record)
@@ -324,11 +327,15 @@ export class McpManagerService extends Service {
     }
   }
 
-  private entryMatches(record: ManagedServerRecord, entry: LoaderEntryFace | undefined): boolean {
+  private entryMatches(
+    record: ManagedServerRecord,
+    entry: LoaderEntryFace | undefined,
+    disabledOverride?: boolean,
+  ): boolean {
     if (entry === undefined) return false
     const expected = toLoaderEntry(record)
     return entry.options.name === expected.name
-      && Boolean(entry.options.disabled) === Boolean(expected.disabled)
+      && Boolean(entry.options.disabled) === (disabledOverride ?? Boolean(expected.disabled))
       && stable(entry.options.config) === stable(expected.config)
   }
 
@@ -339,6 +346,7 @@ export class McpManagerService extends Service {
     for (const id of [...this.records.keys()]) {
       if (!ids.has(id)) {
         this.records.delete(id)
+        this.temporarilyStoppedIds.delete(id)
         this.bumpRevision()
       }
     }
@@ -359,6 +367,7 @@ export class McpManagerService extends Service {
         this.records.set(config.id, record)
         this.bumpRevision()
       } else if (record.fingerprint !== fingerprint) {
+        this.temporarilyStoppedIds.delete(config.id)
         record.config = config
         record.fingerprint = fingerprint
         record.state = config.enabled ? 'starting' : 'disabled'
@@ -372,12 +381,23 @@ export class McpManagerService extends Service {
       const errorBeforeProjection = record.error
       this.refreshTools(record, toolSchemas)
       if (!config.enabled) {
+        this.temporarilyStoppedIds.delete(config.id)
         record.state = 'disabled'
         record.error = undefined
         if (record.state !== stateBeforeProjection || record.error !== errorBeforeProjection) this.touch(record)
         continue
       }
       const entry = this.loaderEntry(config.id)
+      if (this.temporarilyStoppedIds.has(config.id)) {
+        if (this.entryMatches(config, entry, true) && entry?.fiber === undefined) {
+          record.state = 'stopped'
+          record.error = undefined
+          if (record.state !== stateBeforeProjection || record.error !== errorBeforeProjection) this.touch(record)
+          continue
+        }
+        // A profile/config reload replaced the in-memory Loader override.
+        this.temporarilyStoppedIds.delete(config.id)
+      }
       // A Fiber receives its uid before an async plugin finishes loading.
       // dsh-mcp-client registers the initial tool generation during that
       // LOADING phase, so uid presence alone can briefly project READY / 0.
@@ -418,6 +438,74 @@ export class McpManagerService extends Service {
     this.touch(record)
   }
 
+  /** Start one existing Loader row in memory and wait for activation. */
+  private async startLoaderEntry(
+    record: RuntimeRecord,
+    entry: LoaderEntryFace,
+    config = toLoaderEntry(record.config).config,
+  ): Promise<void> {
+    await entry.update({ disabled: null, config })
+    if (entry.fiber?.state !== FIBER_STATE_ACTIVE) {
+      throw new Error('the Loader Fiber did not become active')
+    }
+  }
+
+  /** Stop one existing Loader row in memory and restore its stored config. */
+  private async stopLoaderEntry(record: RuntimeRecord, entry: LoaderEntryFace): Promise<void> {
+    const expected = toLoaderEntry(record.config)
+    await entry.update({ disabled: true, config: expected.config })
+    if (!this.entryMatches(record.config, entry, true) || entry.fiber !== undefined) {
+      throw new Error('the Loader row did not stop cleanly')
+    }
+  }
+
+  /**
+   * Temporarily start an otherwise disabled Loader row for Doctor, then always
+   * restore the exact disabled projection. Entry.update() mutates only the
+   * Loader's in-memory row; unlike EntryTree.update(), it does not persist the
+   * transient state to cordis.patch.yml.
+   */
+  private async diagnoseDisabledRuntime(record: RuntimeRecord): Promise<number> {
+    const entry = this.loaderEntry(record.id)
+    if (entry === undefined || !this.entryMatches(record.config, entry)) {
+      throw new Error('the disabled Loader row has not been applied yet')
+    }
+
+    const expected = toLoaderEntry(record.config)
+    const configuredReconnect = typeof expected.config.reconnect === 'object'
+      && expected.config.reconnect !== null
+      && !Array.isArray(expected.config.reconnect)
+      ? expected.config.reconnect as Record<string, unknown>
+      : {}
+    const diagnosticConfig = {
+      ...expected.config,
+      failOnStartupError: true,
+      reconnect: { ...configuredReconnect, enabled: false },
+    }
+
+    let toolCount: number | undefined
+    let diagnosticError: unknown
+    try {
+      await this.startLoaderEntry(record, entry, diagnosticConfig)
+      toolCount = this.toolsFor(record.config.serverName).length
+    } catch (error) {
+      diagnosticError = error
+    }
+
+    try {
+      await this.stopLoaderEntry(record, entry)
+    } catch (restoreError) {
+      diagnosticError = diagnosticError === undefined
+        ? restoreError
+        : new AggregateError([diagnosticError, restoreError], 'diagnosis failed and the Loader row could not be restored')
+    } finally {
+      this.refreshTools(record)
+    }
+
+    if (diagnosticError !== undefined) throw diagnosticError
+    return toolCount ?? 0
+  }
+
   // ── RPC dispatch ──────────────────────────────────────────────────────────
 
   async invoke(endpoint: string, payload: unknown): Promise<McpManagerSnapshot> {
@@ -445,12 +533,15 @@ export class McpManagerService extends Service {
     }
 
     const entry = this.loaderEntry(id)
-    const loaderApplied = this.entryMatches(record.config, entry)
+    const temporarilyStopped = this.temporarilyStoppedIds.has(id) && this.entryMatches(record.config, entry, true)
+    const loaderApplied = temporarilyStopped || this.entryMatches(record.config, entry)
     checks.push({
       id: 'loader',
       state: loaderApplied ? 'pass' : 'fail',
       detail: loaderApplied
-        ? `applied${entry?.fiber?.state === FIBER_STATE_ACTIVE ? ', Fiber active' : ', Fiber is not active yet'}`
+        ? temporarilyStopped
+          ? 'applied, stopped'
+          : `applied${entry?.fiber?.state === FIBER_STATE_ACTIVE ? ', Fiber active' : ', disabled Fiber ready for temporary diagnosis'}`
         : 'managed row has not been applied by the Loader',
       ...(loaderApplied ? {} : { suggestion: 'reload-profile' as const }),
     })
@@ -503,23 +594,72 @@ export class McpManagerService extends Service {
       })
     }
 
-    const runtimeState: McpDoctorCheck['state'] = view.state === 'connected'
-      ? 'pass'
-      : view.state === 'failed' || view.state === 'stopped'
-        ? 'fail'
-        : 'warn'
-    checks.push({
-      id: 'runtime',
-      state: runtimeState,
-      detail: view.error ? `${view.state}: ${view.error}` : view.state,
-      ...(runtimeState === 'pass' ? {} : { suggestion: runtimeSuggestion(view) }),
-    })
-    checks.push({
-      id: 'tools',
-      state: view.tools.length > 0 ? 'pass' : 'warn',
-      detail: `${view.tools.length} registered tool(s)`,
-      ...(view.tools.length > 0 ? {} : { suggestion: view.state === 'connected' ? 'reconnect-runtime' as const : 'wait-runtime' as const }),
-    })
+    if (!view.enabled) {
+      const preflightFailed = checks.some((check) => (
+        check.state === 'fail'
+        && (check.id === 'loader' || check.id === 'target' || check.id === 'cwd' || check.id === 'credentials')
+      ))
+      if (preflightFailed) {
+        checks.push({
+          id: 'runtime',
+          state: 'skip',
+          detail: 'temporary connection was not attempted because a configuration check failed',
+        })
+        checks.push({
+          id: 'tools',
+          state: 'skip',
+          detail: 'tool discovery requires a successful diagnostic connection',
+        })
+      } else {
+        try {
+          const toolCount = await this.enqueue(() => this.diagnoseDisabledRuntime(record))
+          checks.push({
+            id: 'runtime',
+            state: 'pass',
+            detail: 'reachable',
+          })
+          checks.push({
+            id: 'tools',
+            state: toolCount > 0 ? 'pass' : 'warn',
+            detail: `${toolCount} tool(s) discovered during temporary activation`,
+            ...(toolCount > 0 ? {} : { suggestion: 'reconnect-runtime' as const }),
+          })
+        } catch (error) {
+          const detail = this.redact(errorText(error), await this.resolvedSecrets(record.config))
+          checks.push({
+            id: 'runtime',
+            state: 'fail',
+            detail: `temporary Loader activation failed: ${detail}`,
+            suggestion: runtimeSuggestion({ ...view, state: 'failed', error: detail }),
+          })
+          checks.push({
+            id: 'tools',
+            state: 'skip',
+            detail: 'tool discovery requires a successful diagnostic connection',
+          })
+        }
+      }
+    } else {
+      const runtimeState: McpDoctorCheck['state'] = view.state === 'connected'
+        ? 'pass'
+        : view.state === 'failed'
+          ? 'fail'
+          : 'warn'
+      checks.push({
+        id: 'runtime',
+        state: runtimeState,
+        detail: view.error ? `${view.state}: ${view.error}` : view.state,
+        ...(runtimeState === 'pass' || temporarilyStopped ? {} : { suggestion: runtimeSuggestion(view) }),
+      })
+      checks.push({
+        id: 'tools',
+        state: temporarilyStopped ? 'skip' : view.tools.length > 0 ? 'pass' : 'warn',
+        detail: temporarilyStopped ? 'server is stopped' : `${view.tools.length} registered tool(s)`,
+        ...(temporarilyStopped || view.tools.length > 0
+          ? {}
+          : { suggestion: view.state === 'connected' ? 'reconnect-runtime' as const : 'wait-runtime' as const }),
+      })
+    }
 
     return {
       serverId: id,
@@ -537,7 +677,12 @@ export class McpManagerService extends Service {
         await this.enqueue(() => this.syncFromFile())
         return this.snapshot()
       case 'upsertSet': {
-        const set = normalizeSetRecord(asPayload(payload).set)
+        const input = asPayload(payload)
+        const set = normalizeSetRecord(input.set)
+        const requestedActive = input.active
+        if (requestedActive !== undefined && typeof requestedActive !== 'boolean') {
+          throw new ManagerError('active must be a boolean', { code: 'invalid-payload' })
+        }
         await this.enqueue(async () => {
           const storage = await this.readStorage()
           const known = new Set(storage.servers.map((server) => server.id))
@@ -553,9 +698,13 @@ export class McpManagerService extends Service {
           const index = sets.sets.findIndex((candidate) => candidate.id === set.id)
           if (index === -1) sets.sets.push(set)
           else sets.sets[index] = set
-          const servers = applyActiveSetsToServers(storage.servers, sets.sets, sets.activeSetIds)
+          const active = new Set(sets.activeSetIds)
+          if (requestedActive === true) active.add(set.id)
+          else if (requestedActive === false) active.delete(set.id)
+          const activeSetIds = [...active]
+          const servers = applyActiveSetsToServers(storage.servers, sets.sets, activeSetIds)
           const written = await this.writeServers(servers)
-          await this.writeSets(sets.sets, sets.activeSetIds)
+          await this.writeSets(sets.sets, activeSetIds)
           await this.syncFromFile(written)
         })
         return this.snapshot()
@@ -646,6 +795,16 @@ export class McpManagerService extends Service {
         await this.enqueue(() => this.reconnectServer(id))
         return this.snapshot()
       }
+      case 'stop': {
+        const id = stringField(payload, 'id')
+        await this.enqueue(() => this.stopServer(id))
+        return this.snapshot()
+      }
+      case 'resume': {
+        const id = stringField(payload, 'id')
+        await this.enqueue(() => this.resumeServer(id))
+        return this.snapshot()
+      }
       default:
         throw new ManagerError(`unknown mcp-manager endpoint ${JSON.stringify(endpoint)}`, { code: 'unknown-endpoint' })
     }
@@ -668,6 +827,57 @@ export class McpManagerService extends Service {
       if (record.state === 'starting') record.state = 'connected'
     } catch (error) {
       record.state = 'failed'
+      record.error = errorText(error)
+      throw error
+    } finally {
+      this.touch(record)
+    }
+  }
+
+  private async stopServer(id: string): Promise<void> {
+    await this.syncFromFile()
+    const record = this.records.get(id)
+    if (record === undefined) throw new ManagerError(`server ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+    if (!record.config.enabled) throw new ManagerError('server is disabled by its Sets.', { code: 'disabled' })
+    const entry = this.loaderEntry(id)
+    if (this.temporarilyStoppedIds.has(id) && this.entryMatches(record.config, entry, true)) return
+    if (entry === undefined || !this.entryMatches(record.config, entry)) {
+      throw new ManagerError('the Loader has not applied this server yet.', { code: 'not-active' })
+    }
+    try {
+      await this.stopLoaderEntry(record, entry)
+      this.temporarilyStoppedIds.add(id)
+      record.state = 'stopped'
+      record.error = undefined
+      this.refreshTools(record)
+    } catch (error) {
+      record.state = 'failed'
+      record.error = errorText(error)
+      throw error
+    } finally {
+      this.touch(record)
+    }
+  }
+
+  private async resumeServer(id: string): Promise<void> {
+    await this.syncFromFile()
+    const record = this.records.get(id)
+    if (record === undefined) throw new ManagerError(`server ${JSON.stringify(id)} does not exist`, { code: 'not-found' })
+    if (!record.config.enabled) throw new ManagerError('server is disabled by its Sets.', { code: 'disabled' })
+    const entry = this.loaderEntry(id)
+    if (!this.temporarilyStoppedIds.has(id) || entry === undefined || !this.entryMatches(record.config, entry, true)) {
+      throw new ManagerError('server is not temporarily stopped.', { code: 'not-stopped' })
+    }
+    record.state = 'starting'
+    record.error = undefined
+    this.touch(record)
+    try {
+      await this.startLoaderEntry(record, entry)
+      this.temporarilyStoppedIds.delete(id)
+      record.state = entry.fiber?.state === FIBER_STATE_ACTIVE ? 'connected' : 'starting'
+      this.refreshTools(record)
+    } catch (error) {
+      record.state = 'stopped'
       record.error = errorText(error)
       throw error
     } finally {

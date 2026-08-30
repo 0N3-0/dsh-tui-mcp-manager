@@ -20,6 +20,7 @@ export declare class McpManagerService extends Service {
     private changeNotificationQueued;
     private chain;
     private lastStorage?;
+    private readonly temporarilyStoppedIds;
     constructor(ctx: Context);
     /**
      * Subscribe to manager-owned state changes.
@@ -51,6 +52,17 @@ export declare class McpManagerService extends Service {
     private toolsFor;
     /** Reconcile the cached view with the native registry without inventing a state transition. */
     private refreshTools;
+    /** Start one existing Loader row in memory and wait for activation. */
+    private startLoaderEntry;
+    /** Stop one existing Loader row in memory and restore its stored config. */
+    private stopLoaderEntry;
+    /**
+     * Temporarily start an otherwise disabled Loader row for Doctor, then always
+     * restore the exact disabled projection. Entry.update() mutates only the
+     * Loader's in-memory row; unlike EntryTree.update(), it does not persist the
+     * transient state to cordis.patch.yml.
+     */
+    private diagnoseDisabledRuntime;
     invoke(endpoint: string, payload: unknown): Promise<McpManagerSnapshot>;
     /**
      * Diagnose one server without opening another MCP transport. Runtime checks
@@ -59,6 +71,8 @@ export declare class McpManagerService extends Service {
     doctor(id: string): Promise<McpDoctorReport>;
     private dispatchRpc;
     private reconnectServer;
+    private stopServer;
+    private resumeServer;
     private credentialState;
     private resolvedSecrets;
     private redact;

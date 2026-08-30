@@ -106,9 +106,10 @@ export interface McpManagerSnapshot {
     activeSetIds: string[];
 }
 export type McpDoctorState = 'pass' | 'warn' | 'fail';
+export type McpDoctorCheckState = McpDoctorState | 'skip';
 export interface McpDoctorCheck {
     id: 'storage' | 'loader' | 'target' | 'cwd' | 'credentials' | 'runtime' | 'tools';
-    state: McpDoctorState;
+    state: McpDoctorCheckState;
     detail: string;
     suggestion?: 'fix-permissions' | 'reload-profile' | 'edit-command' | 'edit-url' | 'edit-cwd' | 'set-credentials' | 'check-auth' | 'check-network' | 'reconnect-runtime' | 'wait-runtime';
 }

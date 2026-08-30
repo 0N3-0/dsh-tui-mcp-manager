@@ -19,8 +19,9 @@ import {
   serverStateColor,
   serverStateGlyph,
 } from './scene-server-detail.js'
-import { renderServerEditorView } from './scene-server-editor.js'
-import { renderSetDetailView, renderSetEditorView } from './scene-set-detail.js'
+import { renderServerEditorView, serverEditorSelectionHelp } from './scene-server-editor.js'
+import { SceneSearchInput } from './scene-search-input.js'
+import { renderSetDetailView, renderSetEditorView, setEditorSelectionHelp } from './scene-set-detail.js'
 
 export type { SceneLanguage } from './scene-i18n.js'
 
@@ -40,12 +41,14 @@ export function createMcpManagerScene(
     const { Box, Text, useTerminalSize } = ui
     const { columns, rows } = useTerminalSize()
     const {
-      lang, snapshot, workspace, focusArea, selectedIndex, navItems, selected,
+      lang, snapshot, workspace, focusArea, selectedIndex, navItems, navTotal, navFilter, navSearchCursor, selected,
       selectedServer, selectedSet, tab, detailActionIndex, toolIndex, toolDetailOpen, doctor, busy,
       notice, error, confirm, setEditor, setEditorRows, detailScrollTop,
-      serverEditor, serverEditorRows,
+      serverEditor, serverEditorRows, selectedFilteredToolIndex, toolFilter, toolSearchCursor,
+      filteredToolIndices,
       setFocusArea, setToolDetailOpen, selectNavItem, selectWorkspace, selectTab,
-      openTool, activateDetailAction, openCreateSet, activateSetEditorRow,
+      beginNavSearch,
+      beginToolSearch, openTool, activateDetailAction, openCreateSet, activateSetEditorRow,
       openServerEditor, activateServerEditorRow,
       removeConfirmed, cancelRemoval, scrollDetailTo,
     } = useMcpManagerSceneController(props, manager, resolveLanguage, credentials)
@@ -54,8 +57,19 @@ export function createMcpManagerScene(
     const ready = snapshot?.servers.filter((server: McpServerView) => server.state === 'connected').length ?? 0
     const toolCount = snapshot?.servers.reduce((sum: number, server: McpServerView) => sum + server.tools.length, 0) ?? 0
     const compact = columns < 72
+    const navWidth = compact ? columns - 2 : Math.min(34, Math.max(24, Math.floor(columns * 0.3)))
+    const editorRowWidth = compact
+      ? Math.max(12, columns - 10)
+      : Math.max(12, columns - navWidth - 11)
+    const editorHelp = serverEditor !== undefined
+      ? serverEditorSelectionHelp(lang, serverEditor, serverEditorRows)
+      : setEditor !== undefined
+        ? setEditorSelectionHelp(lang, setEditor, setEditorRows)
+        : navSearchCursor !== undefined
+          ? text(lang, workspace === 'servers' ? 'helpSearchServers' : 'helpSearchSets')
+          : toolSearchCursor !== undefined ? text(lang, 'helpSearchTools') : undefined
     const confirmHeight = confirm === undefined ? 0 : 8
-    const bodyHeight = Math.max(8, rows - (confirm === undefined ? 6 : 3) - confirmHeight)
+    const bodyHeight = Math.max(8, rows - (confirm === undefined ? 6 + (editorHelp === undefined ? 0 : 1) : 3) - confirmHeight)
     const detailHeight = compact ? Math.max(8, bodyHeight - 9) : bodyHeight
     const detailScrollHeight = Math.max(3, detailHeight - (selectedServer === undefined ? 3 : 6))
     const activeDetailViewportHeight = serverEditor !== undefined || setEditor !== undefined
@@ -65,10 +79,31 @@ export function createMcpManagerScene(
     const measuredDetailHeight = detailContentRef.current?.yogaNode?.getComputedHeight() ?? activeDetailViewportHeight
     const maxDetailScrollTop = Math.max(0, Math.ceil(measuredDetailHeight) - activeDetailViewportHeight)
     const visibleDetailScrollTop = Math.min(detailScrollTop, maxDetailScrollTop)
-    const navLimit = Math.max(4, compact ? 5 : bodyHeight - 4)
+    const navLimit = Math.max(1, compact ? 2 : bodyHeight - 6)
     const shownNav = navWindow(navItems, selectedIndex, navLimit)
     const detailActionsVisible = setEditor === undefined && serverEditor === undefined
       && (selectedSet !== undefined || (selectedServer !== undefined && tab === 'overview'))
+    const serverEditorEnterAction = serverEditor === undefined
+      ? 'editValue'
+      : (() => {
+          const row = serverEditorRows[serverEditor.selected]
+          if (row?.kind === 'transport') return 'toggle'
+          if (row?.kind === 'boolean') return 'toggleOption'
+          if (row?.kind === 'save') return 'save'
+          if (row?.kind === 'cancel') return 'cancel'
+          return 'editValue'
+        })()
+    const setEditorEnterAction = setEditor === undefined
+      ? 'editValue'
+      : (() => {
+          const row = setEditorRows[setEditor.selected]
+          if (row?.kind === 'search') return 'search'
+          if (row?.kind === 'member') return 'toggleMember'
+          if (row?.kind === 'boolean') return 'toggleOption'
+          if (row?.kind === 'save') return 'save'
+          if (row?.kind === 'cancel') return 'cancel'
+          return 'editValue'
+        })()
 
     // ScrollBox's DECSTBM optimization scrolls whole terminal rows and corrupts
     // a horizontal sibling. Keep this viewport clipped and move only its child.
@@ -106,7 +141,7 @@ export function createMcpManagerScene(
       Box,
       {
         flexDirection: 'column',
-        width: compact ? '100%' : Math.min(34, Math.max(24, Math.floor(columns * 0.3))),
+        width: compact ? '100%' : navWidth,
         height: compact ? 8 : bodyHeight,
         minHeight: 7,
         flexShrink: 0,
@@ -114,8 +149,18 @@ export function createMcpManagerScene(
         borderColor: focusArea === 'navigation' ? 'suggestion' : 'inactive',
         paddingX: 1,
       },
-      h(Text, { bold: true, color: 'permission' }, `${text(lang, workspace)}  ${navItems.length}`),
-      navItems.length === 0 && h(Text, { color: 'subtle' }, text(lang, workspace === 'servers' ? 'noServers' : 'noSets')),
+      h(Text, { bold: true, color: 'permission' }, `${text(lang, workspace)}  ${navItems.length}/${navTotal}`),
+      h(SceneSearchInput, {
+        React,
+        ui,
+        query: navFilter,
+        cursor: navSearchCursor,
+        maxWidth: Math.max(3, navWidth - 7),
+        compact: true,
+        beginSearch: beginNavSearch,
+      }),
+      navTotal === 0 && h(Text, { color: 'subtle' }, text(lang, workspace === 'servers' ? 'noServers' : 'noSets')),
+      navTotal > 0 && navItems.length === 0 && h(Text, { color: 'subtle' }, text(lang, 'noMatches')),
       ...shownNav.map((item) => {
         const selectedItem = item.key === selected?.key
         const focused = selectedItem && focusArea === 'navigation'
@@ -192,18 +237,25 @@ export function createMcpManagerScene(
       null,
       renderDetailAction(0, '\u2192', text(lang, 'editServer'), 'suggestion'),
       renderDetailAction(1, '+', text(lang, 'duplicateServer'), 'permission'),
-      renderDetailAction(2, '\u21bb', text(lang, 'reconnect'), 'success', !server.enabled),
-      renderDetailAction(3, '\u25c7', text(lang, 'doctor'), 'permission'),
-      renderDetailAction(4, '×', text(lang, 'deleteServer'), 'error'),
+      renderDetailAction(
+        2,
+        server.state === 'stopped' ? '\u25b6' : '\u25a0',
+        text(lang, server.state === 'stopped' ? 'resumeServer' : 'stopServer'),
+        server.state === 'stopped' ? 'success' : 'warning',
+        !server.enabled,
+      ),
+      renderDetailAction(3, '\u21bb', text(lang, 'reconnect'), 'success', !server.enabled || server.state === 'stopped'),
+      renderDetailAction(4, '\u25c7', text(lang, 'doctor'), 'permission'),
+      renderDetailAction(5, '×', text(lang, 'deleteServer'), 'error'),
       h(Box, { height: 1 }),
     )
 
     const renderSetActions = () => selectedSet === undefined ? null : h(
       React.Fragment,
       null,
-      renderDetailAction(0, selectedSet.active ? '○' : '◆', text(lang, selectedSet.active ? 'disableSet' : 'enableSet'), selectedSet.active ? 'warning' : 'success'),
-      renderDetailAction(1, '\u2192', text(lang, 'editSet'), 'suggestion'),
-      renderDetailAction(2, '×', text(lang, 'deleteSet'), 'error'),
+      renderDetailAction(selectedSet.serverIds.length, selectedSet.active ? '○' : '◆', text(lang, selectedSet.active ? 'disableSet' : 'enableSet'), selectedSet.active ? 'warning' : 'success'),
+      renderDetailAction(selectedSet.serverIds.length + 1, '\u2192', text(lang, 'editSet'), 'suggestion'),
+      renderDetailAction(selectedSet.serverIds.length + 2, '×', text(lang, 'deleteSet'), 'error'),
     )
 
     const renderDetailHeader = (title: string, meta: string) => h(
@@ -258,6 +310,7 @@ export function createMcpManagerScene(
                 snapshot,
                 editor: serverEditor,
                 rows: serverEditorRows,
+                rowWidth: editorRowWidth,
                 activateRow: activateServerEditorRow,
               }),
             ),
@@ -277,6 +330,7 @@ export function createMcpManagerScene(
                 snapshot,
                 editor: setEditor,
                 rows: setEditorRows,
+                rowWidth: editorRowWidth,
                 activateRow: activateSetEditorRow,
               }),
             ),
@@ -308,7 +362,7 @@ export function createMcpManagerScene(
               )),
             ),
             renderDetailViewport(
-              `${selected.key}:${selected.kind === 'server' ? tab : 'set'}:${toolDetailOpen ? `detail:${toolIndex}` : 'list'}`,
+              `${selected.key}:${selected.kind === 'server' ? tab : 'set'}:${toolDetailOpen ? `detail:${toolIndex}` : `list:${toolFilter}`}`,
               selected.kind === 'set'
                 ? h(
                     React.Fragment,
@@ -319,6 +373,9 @@ export function createMcpManagerScene(
                       lang,
                       snapshot,
                       set: selected.set,
+                      focusArea,
+                      selectedMemberIndex: detailActionIndex < selected.set.serverIds.length ? detailActionIndex : -1,
+                      activateMember: activateDetailAction,
                     }),
                     h(Box, { height: 1 }),
                     renderSetActions(),
@@ -331,16 +388,21 @@ export function createMcpManagerScene(
                       ui,
                       lang,
                       server: selected.server,
+                      sets: snapshot.sets,
                       tab,
                       focusArea,
-                      toolIndex,
+                      toolIndex: toolDetailOpen ? toolIndex : selectedFilteredToolIndex,
                       toolDetailOpen,
+                      toolFilter,
+                      toolSearchCursor,
+                      filteredToolIndices,
                       detailScrollHeight,
                       doctor,
                       busy,
                       setToolDetailOpen,
                       setFocusArea,
                       scrollDetailTo,
+                      beginToolSearch,
                       openTool,
                     }),
                     tab === 'overview' && h(Box, { height: 1 }),
@@ -436,38 +498,58 @@ export function createMcpManagerScene(
       ),
       confirm === undefined && h(
         Box,
-        { flexDirection: 'row', minHeight: 2, flexShrink: 0, paddingTop: 1, columnGap: 2, flexWrap: 'wrap' },
-        serverEditor !== undefined
-          ? h(React.Fragment, null,
-              serverEditor.editing !== undefined
-                ? h(Text, { color: 'suggestion' }, `Enter ${text(lang, 'back')}  Backspace ${text(lang, 'deleteCharacter')}  Ctrl+U ${text(lang, 'clearValue')}  Esc ${text(lang, 'cancel')}`)
-                : h(Text, { color: 'suggestion' }, `↑↓ ${text(lang, 'navigate')}  Enter ${text(lang, 'editValue')}  Esc ${text(lang, 'cancel')}`),
-            )
-          : setEditor !== undefined
-          ? h(React.Fragment, null,
-              setEditor.editing !== undefined
-                ? h(Text, { color: 'suggestion' }, `Enter ${text(lang, 'back')}  Backspace ${text(lang, 'deleteCharacter')}  Esc ${text(lang, 'cancel')}`)
-                : h(Text, { color: 'suggestion' }, `\u2191\u2193 ${text(lang, 'navigate')}  Enter ${text(lang, 'editValue')}  Esc ${text(lang, 'cancel')}`),
-            )
-          : h(React.Fragment, null,
+        {
+          flexDirection: 'column',
+          minHeight: editorHelp === undefined ? 2 : 3,
+          flexShrink: 0,
+          paddingTop: 1,
+        },
+        editorHelp !== undefined && h(Text, { color: 'permission', wrap: 'truncate-end' }, editorHelp),
+        h(
+          Box,
+          { flexDirection: 'row', columnGap: 2, flexWrap: 'wrap' },
+          serverEditor !== undefined
+            ? h(React.Fragment, null,
+                serverEditor.editing !== undefined
+                  ? h(Text, { color: 'suggestion' }, `←→ ${text(lang, 'moveCursor')}  Backspace ${text(lang, 'deleteCharacter')}  Ctrl+U ${text(lang, 'clearValue')}  Enter ${text(lang, 'back')}  Esc ${text(lang, 'cancel')}`)
+                  : h(Text, { color: 'suggestion' }, `↑↓ ${text(lang, 'navigate')}  Enter ${text(lang, serverEditorEnterAction)}  Esc ${text(lang, 'cancel')}`),
+              )
+            : setEditor !== undefined
+            ? h(React.Fragment, null,
+                setEditor.memberSearchCursor !== undefined
+                  ? h(Text, { color: 'suggestion' }, `←→ ${text(lang, 'moveCursor')}  Backspace ${text(lang, 'deleteCharacter')}  Enter ${text(lang, 'applySearch')}  Esc ${text(lang, 'clearSearch')}`)
+                  : setEditor.editing !== undefined
+                  ? h(Text, { color: 'suggestion' }, `←→ ${text(lang, 'moveCursor')}  Backspace ${text(lang, 'deleteCharacter')}  Ctrl+U ${text(lang, 'clearValue')}  Enter ${text(lang, 'back')}  Esc ${text(lang, 'cancel')}`)
+                  : h(Text, { color: 'suggestion' }, `\u2191\u2193 ${text(lang, 'navigate')}  Enter ${text(lang, setEditorEnterAction)}  / ${text(lang, 'search')}  Esc ${text(lang, setEditor.memberFilter === '' ? 'cancel' : 'clearSearch')}`),
+              )
+            : navSearchCursor !== undefined
+              ? h(Text, { color: 'suggestion' }, `←→ ${text(lang, 'moveCursor')}  Backspace ${text(lang, 'deleteCharacter')}  Enter ${text(lang, 'applySearch')}  Esc ${text(lang, 'clearSearch')}`)
+            : toolSearchCursor !== undefined
+              ? h(Text, { color: 'suggestion' }, `←→ ${text(lang, 'moveCursor')}  Backspace ${text(lang, 'deleteCharacter')}  Enter ${text(lang, 'applySearch')}  Esc ${text(lang, 'clearSearch')}`)
+            : h(React.Fragment, null,
               h(Text, { color: focusArea === 'navigation' ? 'suggestion' : 'permission' },
                 `Tab ${text(lang, 'focus')}: ${text(lang, focusArea === 'navigation' ? 'navigationPane' : 'detailPane')}`,
               ),
               !compact && h(Text, { color: 'subtle' }, `w ${text(lang, 'switchWorkspace')}`),
-              focusArea === 'navigation' && h(Text, { color: 'subtle' }, `\u2191\u2193 ${text(lang, 'navigate')}`),
+              focusArea === 'navigation' && h(Text, { color: 'subtle' }, `\u2191\u2193 ${text(lang, 'navigate')}  / ${text(lang, 'search')}`),
               focusArea === 'detail' && detailActionsVisible && h(Text, { color: 'suggestion' }, `\u2191\u2193 ${text(lang, 'navigateActions')}  Enter ${text(lang, 'activateAction')}`),
               focusArea === 'detail' && selected !== undefined && h(Text, { color: 'subtle' }, `PgUp/PgDn ${text(lang, 'scroll')}`),
               focusArea === 'detail' && selectedServer !== undefined && h(Text, { color: 'subtle' }, `\u2190\u2192 ${text(lang, 'tabs')}`),
               focusArea === 'detail' && selectedServer !== undefined && tab === 'tools' && h(Text, { color: 'subtle' },
                 toolDetailOpen
                   ? `\u2191\u2193 ${text(lang, 'toolNav')}`
-                  : `\u2191\u2193 ${text(lang, 'toolNav')}  Enter ${text(lang, 'openTool')}`,
+                  : `\u2191\u2193 ${text(lang, 'toolNav')}  Enter ${text(lang, 'openTool')}  / ${text(lang, 'search')}`,
               ),
               !compact && workspace === 'sets' && h(Text, { color: 'subtle' }, `a ${text(lang, 'createSet')}`),
               !compact && workspace === 'servers' && h(Text, { color: 'subtle' }, `a ${text(lang, 'createServer')}`),
               !compact && h(Text, { color: 'subtle' }, `r ${text(lang, 'refresh')}`),
-              h(Text, { color: 'subtle' }, `Esc ${text(lang, toolDetailOpen || focusArea === 'detail' ? 'back' : 'close')}`),
+              h(Text, { color: 'subtle' }, `Esc ${text(lang,
+                navFilter !== '' && focusArea === 'navigation'
+                  ? 'clearSearch'
+                  : toolDetailOpen || focusArea === 'detail' ? 'back' : 'close',
+              )}`),
             ),
+        ),
       ),
     )
   }

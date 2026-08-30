@@ -78,7 +78,7 @@ export async function apply(ctx: Context, input: unknown): Promise<void> {
     if (current !== undefined) await current.dispose()
   }
 
-  const restart = async () => {
+  const restart = async (propagateError = false) => {
     if (disposed) return
     let runtime: Record<string, unknown>
     try {
@@ -86,6 +86,7 @@ export async function apply(ctx: Context, input: unknown): Promise<void> {
     } catch (error) {
       await stop()
       ctx.logger.error(`${label}: ${errorText(error)}`)
+      if (propagateError) throw error
       return
     }
     try {
@@ -99,11 +100,15 @@ export async function apply(ctx: Context, input: unknown): Promise<void> {
     } catch (error) {
       child = undefined
       ctx.logger.error(`${label}: failed to activate mcp-client: ${errorText(error)}`)
+      if (propagateError) throw error
     }
   }
 
-  const enqueueRestart = () => {
-    const run = chain.then(restart, restart)
+  const enqueueRestart = (propagateError = false) => {
+    const run = chain.then(
+      () => restart(propagateError),
+      () => restart(propagateError),
+    )
     chain = run.then(() => undefined, () => undefined)
     return run
   }
@@ -118,5 +123,5 @@ export async function apply(ctx: Context, input: unknown): Promise<void> {
     await stop()
   }, `dsh-tui-mcp-manager-server(${config.serverName})`)
 
-  await enqueueRestart()
+  await enqueueRestart(config.failOnStartupError === true)
 }

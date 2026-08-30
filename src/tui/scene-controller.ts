@@ -15,6 +15,13 @@ import {
   TABS,
   WORKSPACES,
   clamp,
+  clampTextCursor,
+  insertAtTextCursor,
+  matchesNavItem,
+  matchesSearch,
+  removeAtTextCursor,
+  removeBeforeTextCursor,
+  textCursorEnd,
   type ConfirmAction,
   type FocusArea,
   type NavItem,
@@ -41,10 +48,14 @@ export function useMcpManagerSceneController(
   const [focusArea, setFocusArea] = React.useState<FocusArea>('navigation')
   const [selectedServerId, setSelectedServerId] = React.useState<string>('')
   const [selectedSetId, setSelectedSetId] = React.useState<string>('')
+  const [navFilter, setNavFilter] = React.useState('')
+  const [navSearchCursor, setNavSearchCursor] = React.useState<number | undefined>()
   const [tab, setTab] = React.useState<SceneTab>('overview')
   const [detailActionIndex, setDetailActionIndex] = React.useState(0)
   const [toolIndex, setToolIndex] = React.useState(0)
   const [toolDetailOpen, setToolDetailOpen] = React.useState(false)
+  const [toolFilter, setToolFilter] = React.useState('')
+  const [toolSearchCursor, setToolSearchCursor] = React.useState<number | undefined>()
   const [doctor, setDoctor] = React.useState<McpDoctorReport | undefined>()
   const [busy, setBusy] = React.useState<string | undefined>()
   const [notice, setNotice] = React.useState<string | undefined>()
@@ -118,16 +129,25 @@ export function useMcpManagerSceneController(
     }
   }, [load])
 
-  const navItems: NavItem[] = snapshot === undefined
+  const allNavItems: NavItem[] = snapshot === undefined
     ? []
     : workspace === 'servers'
       ? snapshot.servers.map((server: McpServerView) => ({ kind: 'server' as const, key: `server:${server.id}`, server }))
       : snapshot.sets.map((set: McpSetView) => ({ kind: 'set' as const, key: `set:${set.id}`, set }))
+  const navItems = allNavItems.filter((item) => matchesNavItem(navFilter, item))
   const selectedKey = workspace === 'servers' ? `server:${selectedServerId}` : `set:${selectedSetId}`
   const selectedIndex = Math.max(0, navItems.findIndex((item) => item.key === selectedKey))
   const selected = navItems[selectedIndex]
   const selectedServer = selected?.kind === 'server' ? selected.server : undefined
   const selectedSet = selected?.kind === 'set' ? selected.set : undefined
+  const filteredToolIndices = selectedServer === undefined
+    ? []
+    : selectedServer.tools.flatMap((tool, index) => (
+        matchesSearch(toolFilter, tool.name, tool.description) ? [index] : []
+      ))
+  const selectedFilteredToolIndex = filteredToolIndices.includes(toolIndex)
+    ? toolIndex
+    : filteredToolIndices[0] ?? 0
   const activeToolDetailIndex = toolDetailOpen ? toolIndex : -1
 
   const runDoctorFor = React.useCallback((serverId: string): void => {
@@ -165,10 +185,24 @@ export function useMcpManagerSceneController(
   }, [selectedSetId, snapshot?.sets.map((set: McpSetView) => set.id).join('|')])
 
   React.useEffect(() => {
+    setNavFilter('')
+    setNavSearchCursor(undefined)
+  }, [workspace])
+
+  React.useEffect(() => {
+    if (navItems.length === 0 || navItems.some((item) => item.key === selectedKey)) return
+    const first = navItems[0]!
+    if (first.kind === 'server') setSelectedServerId(first.server.id)
+    else setSelectedSetId(first.set.id)
+  }, [workspace, selectedKey, navItems.map((item) => item.key).join('|')])
+
+  React.useEffect(() => {
     setDoctor(undefined)
     setDetailActionIndex(0)
     setToolIndex(0)
     setToolDetailOpen(false)
+    setToolFilter('')
+    setToolSearchCursor(undefined)
     scrollDetailTo(0)
     if (selected?.kind === 'set') setTab('overview')
   }, [selected?.key])
@@ -176,6 +210,8 @@ export function useMcpManagerSceneController(
   React.useEffect(() => {
     setDetailActionIndex(0)
     setToolDetailOpen(false)
+    setToolFilter('')
+    setToolSearchCursor(undefined)
     scrollDetailTo(0)
   }, [tab])
 
@@ -273,12 +309,26 @@ export function useMcpManagerSceneController(
   }
 
   const reconnectSelected = (): void => {
-    if (selectedServer === undefined || !selectedServer.enabled) return
+    if (selectedServer === undefined || !selectedServer.enabled || selectedServer.state === 'stopped') return
     void mutate(
       () => manager.invoke('reconnect', { id: selectedServer.id }),
       text(lang, 'reconnect'),
       text(lang, 'reconnected'),
     )
+  }
+
+  const toggleServerRuntime = (server: McpServerView): void => {
+    if (!server.enabled) return
+    const resume = server.state === 'stopped'
+    void mutate(
+      () => manager.invoke(resume ? 'resume' : 'stop', { id: server.id }),
+      text(lang, resume ? 'resumingServer' : 'stoppingServer'),
+      text(lang, resume ? 'serverResumed' : 'serverStopped'),
+    )
+  }
+
+  const toggleRuntimeSelected = (): void => {
+    if (selectedServer !== undefined) toggleServerRuntime(selectedServer)
   }
 
   const runDoctor = (): void => {
@@ -323,6 +373,8 @@ export function useMcpManagerSceneController(
 
   const selectWorkspace = (next: Workspace): void => {
     setWorkspace(next)
+    setNavFilter('')
+    setNavSearchCursor(undefined)
     setFocusArea('navigation')
     setToolDetailOpen(false)
     scrollDetailTo(0)
@@ -332,6 +384,8 @@ export function useMcpManagerSceneController(
     setWorkspace((current: Workspace) => (
       WORKSPACES[(WORKSPACES.indexOf(current) + 1) % WORKSPACES.length]!
     ))
+    setNavFilter('')
+    setNavSearchCursor(undefined)
     setFocusArea('navigation')
     setToolDetailOpen(false)
     scrollDetailTo(0)
@@ -362,13 +416,19 @@ export function useMcpManagerSceneController(
   }
 
   const moveToolSelection = (delta: number): void => {
-    if (selectedServer === undefined || selectedServer.tools.length === 0) return
-    setToolIndex((current: number) => clamp(current + delta, selectedServer.tools.length))
+    if (filteredToolIndices.length === 0) return
+    setToolIndex((current: number) => {
+      const currentPosition = filteredToolIndices.indexOf(current)
+      return filteredToolIndices[clamp((currentPosition < 0 ? 0 : currentPosition) + delta, filteredToolIndices.length)]!
+    })
   }
 
   const moveOpenTool = (delta: number): void => {
-    if (selectedServer === undefined || selectedServer.tools.length === 0) return
-    setToolIndex((current: number) => clamp(current + delta, selectedServer.tools.length))
+    if (filteredToolIndices.length === 0) return
+    setToolIndex((current: number) => {
+      const currentPosition = filteredToolIndices.indexOf(current)
+      return filteredToolIndices[clamp((currentPosition < 0 ? 0 : currentPosition) + delta, filteredToolIndices.length)]!
+    })
     setFocusArea('detail')
     setToolDetailOpen(true)
     scrollDetailTo(0)
@@ -396,12 +456,14 @@ export function useMcpManagerSceneController(
   const detailActionCount = setEditor !== undefined || serverEditor !== undefined
     ? 0
     : selectedSet !== undefined
-      ? 3
-      : selectedServer !== undefined && tab === 'overview' ? 5 : 0
+      ? selectedSet.serverIds.length + 3
+      : selectedServer !== undefined && tab === 'overview' ? 6 : 0
 
   const moveDetailAction = (delta: number): void => {
     if (detailActionCount === 0) return
-    setDetailActionIndex((current: number) => clamp(current + delta, detailActionCount))
+    const next = clamp(detailActionIndex + delta, detailActionCount)
+    setDetailActionIndex(next)
+    if (selectedSet !== undefined) scrollDetailTo(Math.max(0, next - 4))
   }
 
   const activateDetailAction = (index = detailActionIndex): void => {
@@ -410,17 +472,36 @@ export function useMcpManagerSceneController(
     setFocusArea('detail')
     setDetailActionIndex(next)
     if (selectedSet !== undefined) {
-      if (next === 0) toggleSelected()
-      else if (next === 1) openEditSet()
+      scrollDetailTo(Math.max(0, next - 4))
+      const action = next - selectedSet.serverIds.length
+      if (action < 0) {
+        const serverId = selectedSet.serverIds[next]
+        const server = snapshot?.servers.find((candidate: McpServerView) => candidate.id === serverId)
+        if (server !== undefined) toggleServerRuntime(server)
+      } else if (action === 0) toggleSelected()
+      else if (action === 1) openEditSet()
       else confirmRemoval()
       return
     }
     if (selectedServer === undefined || tab !== 'overview') return
     if (next === 0) openServerEditor('edit')
     else if (next === 1) openServerEditor('duplicate')
-    else if (next === 2) reconnectSelected()
-    else if (next === 3) runDoctor()
+    else if (next === 2) toggleRuntimeSelected()
+    else if (next === 3) reconnectSelected()
+    else if (next === 4) runDoctor()
     else confirmRemoval()
+  }
+
+  const beginToolSearch = (): void => {
+    if (selectedServer === undefined || tab !== 'tools' || toolDetailOpen) return
+    setFocusArea('detail')
+    setToolSearchCursor(textCursorEnd(toolFilter))
+  }
+
+  const beginNavSearch = (): void => {
+    if (setEditor !== undefined || serverEditor !== undefined) return
+    setFocusArea('navigation')
+    setNavSearchCursor(textCursorEnd(navFilter))
   }
 
   useInput((input, key, event) => {
@@ -434,6 +515,113 @@ export function useMcpManagerSceneController(
     }
     if (handleServerEditorInput(input, key)) return
     if (handleSetEditorInput(input, key)) return
+    const navSearchAvailable = focusArea === 'navigation'
+      && setEditor === undefined
+      && serverEditor === undefined
+    if (navSearchCursor !== undefined) {
+      if (key.escape) {
+        setNavFilter('')
+        setNavSearchCursor(undefined)
+        return
+      }
+      if (key.return) {
+        setNavSearchCursor(undefined)
+        return
+      }
+      if (key.leftArrow || key.rightArrow || key.home || key.end) {
+        setNavSearchCursor(key.home
+          ? 0
+          : key.end
+            ? textCursorEnd(navFilter)
+            : clampTextCursor(navFilter, navSearchCursor + (key.leftArrow ? -1 : 1)))
+        return
+      }
+      if (key.ctrl && lower === 'u') {
+        setNavFilter('')
+        setNavSearchCursor(0)
+        return
+      }
+      if (key.backspace || key.delete) {
+        const update = key.backspace
+          ? removeBeforeTextCursor(navFilter, navSearchCursor)
+          : removeAtTextCursor(navFilter, navSearchCursor)
+        setNavFilter(update.value)
+        setNavSearchCursor(update.cursor)
+        return
+      }
+      if (!key.ctrl && !key.meta && !key.super) {
+        const printable = input.replace(/[\u0000-\u001f\u007f]/g, '')
+        if (printable !== '') {
+          const update = insertAtTextCursor(navFilter, navSearchCursor, printable, 80)
+          setNavFilter(update.value)
+          setNavSearchCursor(update.cursor)
+        }
+      }
+      return
+    }
+    if (navSearchAvailable && input === '/' && !key.ctrl && !key.meta && !key.super) {
+      beginNavSearch()
+      return
+    }
+    if (navSearchAvailable && key.escape && navFilter !== '') {
+      setNavFilter('')
+      return
+    }
+    const toolSearchAvailable = focusArea === 'detail'
+      && tab === 'tools'
+      && selectedServer !== undefined
+      && !toolDetailOpen
+    if (toolSearchCursor !== undefined) {
+      if (key.escape) {
+        setToolFilter('')
+        setToolSearchCursor(undefined)
+        setToolIndex(0)
+        return
+      }
+      if (key.return) {
+        setToolSearchCursor(undefined)
+        return
+      }
+      if (key.leftArrow || key.rightArrow || key.home || key.end) {
+        setToolSearchCursor(key.home
+          ? 0
+          : key.end
+            ? textCursorEnd(toolFilter)
+            : clampTextCursor(toolFilter, toolSearchCursor + (key.leftArrow ? -1 : 1)))
+        return
+      }
+      if (key.ctrl && lower === 'u') {
+        setToolFilter('')
+        setToolSearchCursor(0)
+        return
+      }
+      if (key.backspace || key.delete) {
+        const update = key.backspace
+          ? removeBeforeTextCursor(toolFilter, toolSearchCursor)
+          : removeAtTextCursor(toolFilter, toolSearchCursor)
+        setToolFilter(update.value)
+        setToolSearchCursor(update.cursor)
+        return
+      }
+      if (!key.ctrl && !key.meta && !key.super) {
+        const printable = input.replace(/[\u0000-\u001f\u007f]/g, '')
+        if (printable !== '') {
+          const update = insertAtTextCursor(toolFilter, toolSearchCursor, printable, 80)
+          setToolFilter(update.value)
+          setToolSearchCursor(update.cursor)
+        }
+      }
+      return
+    }
+    if (toolSearchAvailable && input === '/' && !key.ctrl && !key.meta && !key.super) {
+      beginToolSearch()
+      return
+    }
+    if (toolSearchAvailable && key.escape && toolFilter !== '') {
+      setToolFilter('')
+      setToolIndex(0)
+      return
+    }
     if (tab === 'tools' && selectedServer !== undefined && toolDetailOpen && key.escape) {
       setToolDetailOpen(false)
       scrollDetailTo(0)
@@ -513,8 +701,8 @@ export function useMcpManagerSceneController(
         moveToolSelection(1)
         return
       }
-      if (tab === 'tools' && !toolDetailOpen && key.return && selectedServer.tools.length > 0) {
-        openTool(clamp(toolIndex, selectedServer.tools.length))
+      if (tab === 'tools' && !toolDetailOpen && key.return && filteredToolIndices.length > 0) {
+        openTool(selectedFilteredToolIndex)
         return
       }
       if (key.upArrow) {
@@ -547,13 +735,20 @@ export function useMcpManagerSceneController(
     focusArea,
     selectedIndex,
     navItems,
+    navTotal: allNavItems.length,
+    navFilter,
+    navSearchCursor,
     selected,
     selectedServer,
     selectedSet,
     tab,
     detailActionIndex,
     toolIndex,
+    selectedFilteredToolIndex,
     toolDetailOpen,
+    toolFilter,
+    toolSearchCursor,
+    filteredToolIndices,
     doctor,
     busy,
     notice,
@@ -568,6 +763,8 @@ export function useMcpManagerSceneController(
     scrollDetailTo,
     setFocusArea,
     setToolDetailOpen,
+    beginNavSearch,
+    beginToolSearch,
     selectNavItem,
     selectWorkspace,
     selectTab,

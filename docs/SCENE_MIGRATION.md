@@ -415,3 +415,73 @@ confirmation and notices, so no redundant wrapper is introduced.
   raw URLs, while excluding the images from the runtime npm tarball.
 - Added release-workflow contract checks for the OIDC permission, trigger,
   runner, npm scripts, publish command, and absence of long-lived token names.
+
+### 2026-08-29 — editor input and activation semantics
+
+- Replaced append-only form editing with a real code-point cursor for Set,
+  server, and credential fields. Arrow/Home/End navigation, insertion,
+  Backspace/Delete, and Ctrl+U now work without corrupting CJK text. The cursor
+  is an inverse cell over the current character instead of a width-changing
+  marker glyph.
+- Made editor values fit the available terminal columns and keep the logical
+  cursor visible when long commands or mappings exceed the row width.
+- Marked required server, credential, and Set fields with one compact `*`
+  instead of verbose inline badges. The footer now explains the selected row's
+  purpose and format, and validation failures move selection to the responsible
+  field.
+- Audited editor action labels against their Enter behavior. Transport rows now
+  say “switch transport”, boolean rows say “toggle option”, and the footer
+  follows the currently selected row instead of always promising field editing.
+- Added a persisted “Enable at startup” choice to the Set editor. Saving it also
+  applies the Set immediately; server activation remains the union of all active
+  Set members, so a shared server still starts only once.
+- Added `/` search to the tool list, Set member picker, and both navigation
+  workspaces. These searches support multi-term matching, an editable
+  code-point cursor, live result counts, and an explicit empty-result state.
+  Enter keeps the filter for navigation; Escape clears it before leaving the
+  surrounding view.
+- Made Doctor independent from Set activation. Servers outside the active Set
+  union still validate storage, Loader projection, target, working directory,
+  and credentials, then temporarily activate their existing disabled Loader row
+  for handshake and tool discovery. The row is restored immediately without
+  persisting the transient state or changing Set membership. Startup failures
+  are propagated during this strict diagnostic activation instead of being
+  mistaken for an active runtime with zero tools.
+- Exercised cursor movement and the startup option in an isolated dsh-TUI 0.9.3
+  profile without replacing the user's npm-installed manager package.
+- Moved tool search onto its own row directly above the tool list instead of
+  stranding the input at the far-right edge of the count heading.
+- Localized and shortened common Doctor details at render time while retaining
+  the Host's raw technical fallback for unexpected failures.
+- Added a process-local server stop/resume action. It toggles only the existing
+  Loader row in memory, preserves Set membership and profile files, projects a
+  distinct stopped state, and is intentionally cleared by configuration/HMR
+  replacement.
+- Made each enabled server name in Set details invoke the same stop/resume
+  operation, avoiding a second action menu or duplicated runtime logic. Set
+  members and Set actions now share one keyboard sequence, with Up/Down,
+  Enter, focus highlighting, pointer activation, and long-list scroll tracking.
+- Added Set membership to each server overview. Active and inactive Sets reuse
+  the filled and hollow navigation glyphs, and an unassigned server is stated
+  explicitly instead of leaving activation behavior to inference.
+- Replaced the idle tool-search placeholder with a compact monochrome
+  magnifying-glass glyph. A subtle bottom rule separates search from results;
+  the `/` shortcut or a pointer click enters search mode and the query remains
+  visible while filtering. The Scene keeps the same inverse-cell cursor used by
+  Set and server editors. Its input component uses only the injected host React
+  and public UI kit, then parks the hidden native cursor on the rendered caret
+  after each alternate-screen frame so IME preedit overlays that cell instead
+  of producing a second block. A single-cell Nerd Font search glyph avoids the
+  terminal-dependent width of Emoji magnifying glasses while retaining the
+  expected line-art silhouette. The search strip has an explicit theme
+  background so out-of-band terminal probe bytes cannot remain visible in
+  otherwise untouched blank cells.
+
+### 2026-08-30 — documentation refresh
+
+- Reduced both READMEs to a shorter install, preview, capability, and controls
+  path. Runtime, managed-block, credential, and development details now remain
+  available in collapsed sections instead of dominating the first read.
+- Replaced all five 2560x1600 screenshots with the current Scene: navigation
+  search, Set startup fields, required markers, server Set membership,
+  stop/resume actions, tool search, and contextual editor footers are now shown.

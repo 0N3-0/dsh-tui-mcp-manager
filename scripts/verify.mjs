@@ -72,13 +72,29 @@ assert.match(sceneEntry, /renderSetEditorView/)
 assert.doesNotMatch(sceneEntry, /function serverFieldLabel/)
 assert.doesNotMatch(sceneEntry, /function yesNo|function json/)
 const serverDetailView = await readFile(new URL('../lib/types/tui/scene-server-detail.js', import.meta.url), 'utf8')
+const searchInputView = await readFile(new URL('../lib/types/tui/scene-search-input.js', import.meta.url), 'utf8')
 assert.match(serverDetailView, /function renderServerDetailView/)
 assert.match(serverDetailView, /function serverStateGlyph/)
 assert.match(serverDetailView, /doctorCheckLabel/)
+assert.match(serverDetailView, /setMembership/)
+assert.match(serverDetailView, /serverIds\.includes\(server\.id\)/)
+assert.match(serverDetailView, /SceneSearchInput/)
+assert.match(serverDetailView, /beginSearch: beginToolSearch/)
+assert.match(searchInputView, /function SceneSearchInput/)
+assert.match(searchInputView, /\\uf002/)
+assert.match(searchInputView, /inverse: true/)
+assert.match(searchInputView, /process\.stdout\.write/)
+assert.match(searchInputView, /backgroundColor: ['"]toolCardBackgroundDim['"]/)
+assert.match(searchInputView, /textCursorSegments/)
+assert.match(sceneEntry, /beginSearch: beginNavSearch/)
+assert.match(sceneEntry, /navItems\.length.*navTotal/)
 const setDetailView = await readFile(new URL('../lib/types/tui/scene-set-detail.js', import.meta.url), 'utf8')
 assert.match(setDetailView, /function renderSetDetailView/)
 assert.match(setDetailView, /function renderSetEditorView/)
 assert.match(setDetailView, /runtimeStateText/)
+assert.match(setDetailView, /activateMember/)
+assert.match(sceneControllerEntry, /selectedSet\.serverIds\.length \+ 3/)
+assert.match(sceneControllerEntry, /next - selectedSet\.serverIds\.length/)
 const serverEditorView = await readFile(new URL('../lib/types/tui/scene-server-editor.js', import.meta.url), 'utf8')
 assert.match(serverEditorView, /function serverFieldLabel/)
 assert.match(serverEditorView, /React\.createElement/)
@@ -95,10 +111,21 @@ assert.ok(sceneStartOffset >= 0 && initialRefreshOffset > sceneStartOffset && su
 const managerEntry = await readFile(new URL('../lib/types/host/manager.js', import.meta.url), 'utf8')
 assert.match(managerEntry, /subscribe\(listener\)/)
 const presentation = await import('../lib/types/tui/presentation.js')
+const sceneI18n = await import('../lib/types/tui/scene-i18n.js')
 const sceneModel = await import('../lib/types/tui/scene-model.js')
 assert.equal(presentation.runtimeStateText('zh', 'connected'), '已连接')
 assert.equal(presentation.doctorCheckStringKey('credentials'), 'doctorCredentials')
 assert.equal(presentation.doctorSuggestionStringKey('check-auth'), 'suggestCheckAuth')
+assert.equal(sceneI18n.doctorCheckDetail('zh', {
+  id: 'runtime',
+  state: 'pass',
+  detail: 'reachable',
+}), '可连接')
+assert.equal(sceneI18n.doctorCheckDetail('zh', {
+  id: 'tools',
+  state: 'pass',
+  detail: '66 tool(s) discovered during temporary activation',
+}), '66 个工具')
 const manyTools = Array.from({ length: 120 }, (_, index) => `tool-${index}`)
 assert.deepEqual(sceneModel.indexedWindow(manyTools, 0, 10), {
   start: 0,
@@ -112,6 +139,61 @@ assert.deepEqual(sceneModel.indexedWindow(manyTools, 60, 9), {
   start: 56,
   items: manyTools.slice(56, 65),
 })
+assert.deepEqual(sceneModel.insertAtTextCursor('abcd', 2, 'XYZ', 5), {
+  value: 'abXcd',
+  cursor: 3,
+})
+assert.deepEqual(sceneModel.insertAtTextCursor('a你c', 2, '好', 8), {
+  value: 'a你好c',
+  cursor: 3,
+})
+assert.deepEqual(sceneModel.removeBeforeTextCursor('a你bc', 3), {
+  value: 'a你c',
+  cursor: 2,
+})
+assert.deepEqual(sceneModel.removeAtTextCursor('a你bc', 1), {
+  value: 'abc',
+  cursor: 1,
+})
+assert.deepEqual(sceneModel.textCursorSegments('a你c', 2), {
+  before: 'a你',
+  cursor: 'c',
+  after: '',
+})
+assert.deepEqual(sceneModel.textCursorSegments('secret', 3, 12, true), {
+  before: '•••',
+  cursor: '•',
+  after: '••',
+})
+assert.deepEqual(sceneModel.textCursorSegments('abc', 3), {
+  before: 'abc',
+  cursor: ' ',
+  after: '',
+})
+assert.equal(sceneModel.terminalTextWidth('\uf002 '), 2)
+assert.equal(sceneModel.terminalTextWidth('a你c'), 4)
+assert.equal(sceneModel.truncateTerminalText('a你bc', 4), 'a你…')
+const narrowCursor = sceneModel.textCursorSegments('一二三四五六', 3, 8)
+assert.ok(sceneModel.terminalTextWidth(`${narrowCursor.before}${narrowCursor.cursor}${narrowCursor.after}`) <= 8)
+assert.notEqual(sceneModel.textCursorSegments('abcdefghijklmnopqrstuvwxyz', 13, 12).cursor, '')
+assert.equal(sceneModel.matchesSearch('IDA query', 'mcp__ida__func_query', 'Query IDA functions'), true)
+assert.equal(sceneModel.matchesSearch('ida missing', 'mcp__ida__func_query', 'Query IDA functions'), false)
+assert.equal(sceneModel.matchesSearch('  ', 'anything'), true)
+assert.equal(sceneModel.matchesNavItem('context ctx', {
+  kind: 'server',
+  key: 'server:context7',
+  server: { id: 'context7', name: 'Context docs', serverName: 'ctx' },
+}), true)
+assert.equal(sceneModel.matchesNavItem('default', {
+  kind: 'set',
+  key: 'set:default',
+  set: { id: 'default', name: 'Default', serverIds: [], active: true },
+}), true)
+assert.equal(sceneModel.matchesNavItem('missing', {
+  kind: 'set',
+  key: 'set:default',
+  set: { id: 'default', name: 'Default', serverIds: [], active: true },
+}), false)
 
 const serverForm = await import('../lib/types/tui/server-form-model.js')
 assert.deepEqual(serverForm.parseArgs('node "two words" --flag'), ['node', 'two words', '--flag'])
@@ -155,16 +237,50 @@ const httpRows = serverEditorController.serverEditorRowsFor({
 assert.equal(httpRows.some((row) => row.kind === 'field' && row.field === 'url'), true)
 assert.equal(httpRows.some((row) => row.kind === 'field' && row.field === 'command'), false)
 assert.deepEqual(httpRows.filter((row) => row.kind === 'credential').map((row) => row.ref), ['CONTEXT7_API_KEY'])
+const serverEditorModule = await import('../lib/types/tui/scene-server-editor.js')
+assert.match(serverEditorModule.serverEditorSelectionHelp('zh', {
+  intent: 'create',
+  draft: httpDraft,
+  selected: 0,
+}, httpRows), /稳定 ID/)
+assert.match(serverEditorModule.serverEditorSelectionHelp('zh', {
+  intent: 'create',
+  draft: httpDraft,
+  selected: 1,
+}, httpRows), /留空/)
 const setRows = setEditorController.setEditorRowsFor({
   mode: 'create',
-  draft: { id: 'set-1', name: '', serverIds: [] },
+  draft: { id: 'set-1', name: '', serverIds: [], active: false },
   selected: 0,
+  memberFilter: '',
 }, [{ id: 'context7', name: 'Context7' }])
 assert.deepEqual(setRows.slice(0, 2), [
   { kind: 'field', field: 'id', editable: true },
   { kind: 'field', field: 'name', editable: true },
 ])
+assert.deepEqual(setRows[2], { kind: 'boolean', field: 'active' })
+assert.deepEqual(setRows[3], { kind: 'search' })
 assert.equal(setRows.some((row) => row.kind === 'member' && row.server.id === 'context7'), true)
+const filteredSetRows = setEditorController.setEditorRowsFor({
+  mode: 'create',
+  draft: { id: 'set-1', name: '', serverIds: [], active: false },
+  selected: 3,
+  memberFilter: 'missing',
+}, [{ id: 'context7', name: 'Context7' }])
+assert.equal(filteredSetRows.some((row) => row.kind === 'member'), false)
+const setEditorView = await import('../lib/types/tui/scene-set-detail.js')
+assert.match(setEditorView.setEditorSelectionHelp('zh', {
+  mode: 'create',
+  draft: { id: 'set-1', name: '', serverIds: [], active: false },
+  selected: 2,
+  memberFilter: '',
+}, setRows), /下次启动/)
+assert.match(setEditorView.setEditorSelectionHelp('zh', {
+  mode: 'create',
+  draft: { id: 'set-1', name: '', serverIds: [], active: false },
+  selected: 3,
+  memberFilter: '',
+}, setRows), /过滤服务器/)
 
 const {
   ProfileSetStore,
@@ -221,7 +337,7 @@ try {
     await mkdir(profileDir, { recursive: true })
     const { Context } = await import('@deepseek-ai/cordis')
     const { McpManagerService } = await import('../lib/types/host/manager.js')
-    const { ProfilePatchStore } = await import('../lib/types/host/patch-store.js')
+    const { ProfilePatchStore, toLoaderEntry } = await import('../lib/types/host/patch-store.js')
     const externalPatchStore = new ProfilePatchStore(patchPath)
     const server = {
       id: 'external',
@@ -247,11 +363,35 @@ try {
 
     const ctx = new Context().extend({ baseUrl: pathToFileURL(`${profileDir}/`).href })
     let toolSchemaReads = 0
+    let diagnosticTools = []
     ctx.provide('tools', { schemas: () => {
       toolSchemaReads += 1
-      return []
+      return diagnosticTools
     } })
-    ctx.provide('loader', { entries: () => [] })
+    const loaderUpdates = []
+    const fakeEntry = {
+      options: toLoaderEntry(server),
+      fiber: undefined,
+      async update(options) {
+        loaderUpdates.push(structuredClone(options))
+        this.options = { ...this.options, ...options }
+        if (this.options.disabled) {
+          this.fiber = undefined
+          diagnosticTools = []
+          return
+        }
+        if (options.config?.failOnStartupError === true) {
+          assert.equal(this.options.config.reconnect.enabled, false)
+        }
+        diagnosticTools = [{
+          name: 'mcp__external__probe_fixture',
+          description: 'Temporary diagnostic fixture',
+          parameters: { type: 'object' },
+        }]
+        this.fiber = { uid: 1, state: 2 }
+      },
+    }
+    ctx.provide('loader', { entries: () => [fakeEntry] })
     const manager = new McpManagerService(ctx)
     const beforeExternalEdit = await manager.invoke('list', {})
     assert.equal(beforeExternalEdit.profile.key, 'external-edit')
@@ -275,6 +415,93 @@ try {
     const afterExternalSetEdit = await manager.invoke('list', {})
     assert.deepEqual(afterExternalSetEdit.sets.map((set) => set.name), ['Externally edited Set'])
     assert.deepEqual(afterExternalSetEdit.activeSetIds, ['external-set'])
+
+    await externalPatchStore.write([{
+      ...server,
+      name: 'After external edit',
+      command: process.execPath,
+      args: ['probe-fixture.mjs'],
+    }])
+    await manager.invoke('list', {})
+
+    const setRecord = { id: 'external-set', name: 'Externally edited Set', serverIds: ['external'] }
+    const disabledAtStartup = await manager.invoke('upsertSet', { set: setRecord, active: false })
+    assert.deepEqual(disabledAtStartup.activeSetIds, [])
+    assert.equal(disabledAtStartup.servers.find((item) => item.id === 'external')?.enabled, false)
+    fakeEntry.options = toLoaderEntry({
+      ...server,
+      name: 'After external edit',
+      command: process.execPath,
+      args: ['probe-fixture.mjs'],
+      enabled: false,
+    })
+    const inactiveDoctor = await manager.doctor('external')
+    assert.equal(inactiveDoctor.state, 'pass')
+    assert.equal(inactiveDoctor.checks.find((check) => check.id === 'loader')?.state, 'pass')
+    const inactiveRuntime = inactiveDoctor.checks.find((check) => check.id === 'runtime')
+    const inactiveTools = inactiveDoctor.checks.find((check) => check.id === 'tools')
+    assert.equal(inactiveRuntime?.state, 'pass')
+    assert.equal(inactiveRuntime?.detail, 'reachable')
+    assert.deepEqual(inactiveTools, {
+      id: 'tools',
+      state: 'pass',
+      detail: '1 tool(s) discovered during temporary activation',
+    })
+    assert.equal(loaderUpdates.length, 2)
+    assert.equal(loaderUpdates[0]?.disabled, null)
+    assert.equal(loaderUpdates[0]?.config.failOnStartupError, true)
+    assert.equal(loaderUpdates[0]?.config.reconnect.enabled, false)
+    assert.equal(loaderUpdates[1]?.disabled, true)
+    assert.equal(fakeEntry.options.disabled, true)
+    assert.equal(fakeEntry.fiber, undefined)
+    assert.deepEqual(diagnosticTools, [])
+    const enabledAtStartup = await manager.invoke('upsertSet', { set: setRecord, active: true })
+    assert.deepEqual(enabledAtStartup.activeSetIds, ['external-set'])
+    assert.equal(enabledAtStartup.servers.find((item) => item.id === 'external')?.enabled, true)
+    const enabledServer = {
+      ...server,
+      name: 'After external edit',
+      command: process.execPath,
+      args: ['probe-fixture.mjs'],
+      enabled: true,
+    }
+    fakeEntry.options = toLoaderEntry(enabledServer)
+    fakeEntry.fiber = { uid: 2, state: 2 }
+    diagnosticTools = [{
+      name: 'mcp__external__probe_fixture',
+      description: 'Runtime fixture',
+      parameters: { type: 'object' },
+    }]
+    const connected = await manager.invoke('list', {})
+    assert.equal(connected.servers.find((item) => item.id === 'external')?.state, 'connected')
+    const patchBeforeStop = await readFile(patchPath, 'utf8')
+    const setsPath = join(profileDir, 'mcp-manager.sets.yml')
+    const setsBeforeStop = await readFile(setsPath, 'utf8')
+    const updatesBeforeStop = loaderUpdates.length
+    const stopped = await manager.invoke('stop', { id: 'external' })
+    const stoppedServer = stopped.servers.find((item) => item.id === 'external')
+    assert.equal(stoppedServer?.enabled, true)
+    assert.equal(stoppedServer?.state, 'stopped')
+    assert.deepEqual(stopped.activeSetIds, ['external-set'])
+    assert.deepEqual(stopped.sets[0]?.serverIds, ['external'])
+    assert.equal(fakeEntry.options.disabled, true)
+    assert.equal(fakeEntry.fiber, undefined)
+    assert.deepEqual(diagnosticTools, [])
+    assert.equal((await manager.invoke('list', {})).servers.find((item) => item.id === 'external')?.state, 'stopped')
+    assert.equal(await readFile(patchPath, 'utf8'), patchBeforeStop)
+    assert.equal(await readFile(setsPath, 'utf8'), setsBeforeStop)
+    const resumed = await manager.invoke('resume', { id: 'external' })
+    assert.equal(resumed.servers.find((item) => item.id === 'external')?.state, 'connected')
+    assert.equal(resumed.servers.find((item) => item.id === 'external')?.tools.length, 1)
+    assert.equal(Boolean(fakeEntry.options.disabled), false)
+    assert.equal(loaderUpdates[updatesBeforeStop]?.disabled, true)
+    assert.equal(loaderUpdates[updatesBeforeStop + 1]?.disabled, null)
+    assert.equal(await readFile(patchPath, 'utf8'), patchBeforeStop)
+    assert.equal(await readFile(setsPath, 'utf8'), setsBeforeStop)
+    await assert.rejects(
+      manager.invoke('upsertSet', { set: setRecord, active: 'yes' }),
+      /active must be a boolean/,
+    )
   } finally {
     if (previousDshHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousDshHome

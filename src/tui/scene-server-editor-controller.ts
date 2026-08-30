@@ -9,7 +9,11 @@ import {
 import { sceneText as text, type SceneLanguage } from './scene-i18n.js'
 import {
   clamp,
-  removeLastCodePoint,
+  clampTextCursor,
+  insertAtTextCursor,
+  removeAtTextCursor,
+  removeBeforeTextCursor,
+  textCursorEnd,
   type FocusArea,
   type ServerEditorRow,
   type ServerEditorState,
@@ -20,7 +24,9 @@ import {
   buildServerSubmission,
   createServerDraft,
   credentialReferences,
+  positiveNumber,
   validateServerDraft,
+  type ServerFormDraft,
   type ServerFormIssue,
   type ServerFormIntent,
 } from './server-form-model.js'
@@ -67,6 +73,28 @@ function serverIssueText(language: SceneLanguage, issue: ServerFormIssue): strin
     'invalid-reconnect-delays': 'invalidReconnectDelays',
   } as const
   return text(language, keys[issue])
+}
+
+function serverIssueField(issue: ServerFormIssue, draft: ServerFormDraft): ServerTextField | undefined {
+  switch (issue) {
+    case 'invalid-id':
+    case 'duplicate-id': return 'id'
+    case 'invalid-server-name':
+    case 'duplicate-server-name': return 'serverName'
+    case 'invalid-command': return 'command'
+    case 'invalid-url': return 'url'
+    case 'invalid-pairs': return draft.transport === 'stdio' ? 'env' : 'headers'
+    case 'plain-secret-env': return 'env'
+    case 'invalid-credential-refs': return 'secretEnv'
+    case 'plain-secret-headers': return 'headers'
+    case 'invalid-secret-headers': return 'secretHeaders'
+    case 'invalid-positive-number':
+      if (positiveNumber(draft.toolCallTimeoutMs) === undefined) return 'toolCallTimeoutMs'
+      if (positiveNumber(draft.reconnectInitialDelayMs) === undefined) return 'reconnectInitialDelayMs'
+      return 'reconnectMaxDelayMs'
+    case 'invalid-positive-integer': return 'reconnectMaxAttempts'
+    case 'invalid-reconnect-delays': return 'reconnectInitialDelayMs'
+  }
 }
 
 export function serverEditorRowsFor(editor: ServerEditorState | undefined): ServerEditorRow[] {
@@ -152,7 +180,11 @@ export function useServerEditorController({
     if (snapshot === undefined || busy !== undefined) return
     const issue = validateServerDraft(current.draft, snapshot, current.intent, current.originalId)
     if (issue !== undefined) {
-      setEditor({ ...current, selected: index, error: serverIssueText(lang, issue) })
+      const field = serverIssueField(issue, current.draft)
+      const issueIndex = rows.findIndex((row) => row.kind === 'field' && row.field === field)
+      const selected = issueIndex === -1 ? index : issueIndex
+      scrollDetailTo(selected)
+      setEditor({ ...current, selected, error: serverIssueText(lang, issue) })
       return
     }
     const refs = credentialReferences(current.draft)
@@ -165,17 +197,21 @@ export function useServerEditorController({
         const info = await credentials.describe(credentialRef(ref)).catch(() => ({ configured: false, writable: false }))
         const pending = current.draft.credentialValues[ref]
         if (pending !== undefined && !info.writable) {
+          const selected = rows.findIndex((row) => row.kind === 'credential' && row.ref === ref)
+          if (selected !== -1) scrollDetailTo(selected)
           setEditor({
             ...current,
-            selected: index,
+            selected: selected === -1 ? index : selected,
             error: text(lang, 'credentialReadOnly').replace('{ref}', ref),
           })
           return
         }
         if (pending === undefined && !info.configured) {
+          const selected = rows.findIndex((row) => row.kind === 'credential' && row.ref === ref)
+          if (selected !== -1) scrollDetailTo(selected)
           setEditor({
             ...current,
-            selected: index,
+            selected: selected === -1 ? index : selected,
             error: text(lang, 'credentialRequired').replace('{ref}', ref),
           })
           return
@@ -206,7 +242,11 @@ export function useServerEditorController({
         setEditor({
           ...editor,
           selected: index,
-          editing: { kind: 'field', field: row.field },
+          editing: {
+            kind: 'field',
+            field: row.field,
+            cursor: textCursorEnd(editor.draft[row.field]),
+          },
           error: undefined,
         })
       }
@@ -216,7 +256,11 @@ export function useServerEditorController({
       setEditor({
         ...editor,
         selected: index,
-        editing: { kind: 'credential', ref: row.ref },
+        editing: {
+          kind: 'credential',
+          ref: row.ref,
+          cursor: textCursorEnd(editor.draft.credentialValues[row.ref] ?? ''),
+        },
         error: undefined,
       })
       return
@@ -273,16 +317,30 @@ export function useServerEditorController({
         }
         return true
       }
+      const currentValue = editing.kind === 'field'
+        ? editor.draft[editing.field]
+        : editor.draft.credentialValues[editing.ref] ?? ''
+      if (key.leftArrow || key.rightArrow || key.home || key.end) {
+        const cursor = key.home
+          ? 0
+          : key.end
+            ? textCursorEnd(currentValue)
+            : clampTextCursor(currentValue, editing.cursor + (key.leftArrow ? -1 : 1))
+        setEditor({ ...editor, editing: { ...editing, cursor }, error: undefined })
+        return true
+      }
       if (key.ctrl && lower === 'u') {
         if (editing.kind === 'field') {
           setEditor({
             ...editor,
+            editing: { ...editing, cursor: 0 },
             error: undefined,
             draft: { ...editor.draft, [editing.field]: '' },
           })
         } else {
           setEditor({
             ...editor,
+            editing: { ...editing, cursor: 0 },
             error: undefined,
             draft: {
               ...editor.draft,
@@ -292,26 +350,30 @@ export function useServerEditorController({
         }
         return true
       }
-      if (key.backspace) {
+      if (key.backspace || key.delete) {
+        const update = key.backspace
+          ? removeBeforeTextCursor(currentValue, editing.cursor)
+          : removeAtTextCursor(currentValue, editing.cursor)
         if (editing.kind === 'field') {
           setEditor({
             ...editor,
+            editing: { ...editing, cursor: update.cursor },
             error: undefined,
             draft: {
               ...editor.draft,
-              [editing.field]: removeLastCodePoint(editor.draft[editing.field]),
+              [editing.field]: update.value,
             },
           })
         } else {
-          const value = editor.draft.credentialValues[editing.ref] ?? ''
           setEditor({
             ...editor,
+            editing: { ...editing, cursor: update.cursor },
             error: undefined,
             draft: {
               ...editor.draft,
               credentialValues: {
                 ...editor.draft.credentialValues,
-                [editing.ref]: removeLastCodePoint(value),
+                [editing.ref]: update.value,
               },
             },
           })
@@ -333,21 +395,22 @@ export function useServerEditorController({
               reconnectMaxAttempts: 16,
             }
             const limit = limits[field] ?? 4096
-            const value = Array.from(`${editor.draft[field]}${printable}`).slice(0, limit).join('')
+            const update = insertAtTextCursor(currentValue, editing.cursor, printable, limit)
             setEditor({
               ...editor,
+              editing: { ...editing, cursor: update.cursor },
               error: undefined,
-              draft: { ...editor.draft, [field]: value },
+              draft: { ...editor.draft, [field]: update.value },
             })
           } else {
-            const current = editor.draft.credentialValues[editing.ref] ?? ''
-            const value = Array.from(`${current}${printable}`).slice(0, 8192).join('')
+            const update = insertAtTextCursor(currentValue, editing.cursor, printable, 8192)
             setEditor({
               ...editor,
+              editing: { ...editing, cursor: update.cursor },
               error: undefined,
               draft: {
                 ...editor.draft,
-                credentialValues: { ...editor.draft.credentialValues, [editing.ref]: value },
+                credentialValues: { ...editor.draft.credentialValues, [editing.ref]: update.value },
               },
             })
           }

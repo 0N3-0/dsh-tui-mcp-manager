@@ -9,8 +9,10 @@ interface ServerEditorViewProps {
     snapshot: McpManagerSnapshot | undefined;
     editor: ServerEditorState;
     rows: readonly ServerEditorRow[];
+    rowWidth: number;
     activateRow(index: number): void;
 }
-export declare function renderServerEditorView({ React, ui, lang, snapshot, editor, rows, activateRow, }: ServerEditorViewProps): any;
+export declare function serverEditorSelectionHelp(lang: SceneLanguage, editor: ServerEditorState, rows: readonly ServerEditorRow[]): string;
+export declare function renderServerEditorView({ React, ui, lang, snapshot, editor, rows, rowWidth, activateRow, }: ServerEditorViewProps): any;
 export {};
 //# sourceMappingURL=scene-server-editor.d.ts.map

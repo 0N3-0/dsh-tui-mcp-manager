@@ -3,8 +3,10 @@ import type {
   McpDoctorCheck,
   McpDoctorReport,
   McpServerView,
+  McpSetView,
 } from '../host/types.js'
 import {
+  doctorCheckDetail,
   doctorCheckLabel,
   doctorSuggestion,
   runtimeStateText,
@@ -12,6 +14,7 @@ import {
   type SceneLanguage,
 } from './scene-i18n.js'
 import { clamp, indexedWindow, type FocusArea, type SceneTab } from './scene-model.js'
+import { SceneSearchInput } from './scene-search-input.js'
 
 type ServerStateColor = 'success' | 'warning' | 'error' | 'inactive'
 
@@ -20,16 +23,21 @@ interface ServerDetailViewProps {
   ui: TuiSceneProps['ui']
   lang: SceneLanguage
   server: McpServerView
+  sets: readonly McpSetView[]
   tab: SceneTab
   focusArea: FocusArea
   toolIndex: number
   toolDetailOpen: boolean
+  toolFilter: string
+  toolSearchCursor: number | undefined
+  filteredToolIndices: readonly number[]
   detailScrollHeight: number
   doctor: McpDoctorReport | undefined
   busy: string | undefined
   setToolDetailOpen(open: boolean): void
   setFocusArea(area: FocusArea): void
   scrollDetailTo(offset: number): void
+  beginToolSearch(): void
   openTool(index: number): void
 }
 
@@ -72,16 +80,21 @@ export function renderServerDetailView({
   ui,
   lang,
   server,
+  sets,
   tab,
   focusArea,
   toolIndex,
   toolDetailOpen,
+  toolFilter,
+  toolSearchCursor,
+  filteredToolIndices,
   detailScrollHeight,
   doctor,
   busy,
   setToolDetailOpen,
   setFocusArea,
   scrollDetailTo,
+  beginToolSearch,
   openTool,
 }: ServerDetailViewProps) {
   const { Box, Text } = ui
@@ -94,6 +107,22 @@ export function renderServerDetailView({
   )
 
   if (tab === 'overview') {
+    const memberships = sets.filter((set) => set.serverIds.includes(server.id))
+    const membershipRow = h(
+      Box,
+      { flexDirection: 'row', minHeight: 1, flexWrap: 'wrap' },
+      h(Text, { color: 'subtle' }, `${text(lang, 'setMembership')}: `),
+      memberships.length === 0
+        ? h(Text, { color: 'inactive' }, text(lang, 'noSetMembership'))
+        : memberships.flatMap((set, index) => [
+            index > 0 ? h(Text, { key: `separator:${set.id}` }, '  ') : null,
+            h(
+              Text,
+              { key: set.id, color: set.active ? 'success' : 'inactive' },
+              `${set.active ? '\u25c6' : '\u25c7'} ${set.name}`,
+            ),
+          ]),
+    )
     return h(
       React.Fragment,
       null,
@@ -104,6 +133,7 @@ export function renderServerDetailView({
         ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
         : server.url ?? '-'),
       row(text(lang, 'enabled'), yesNo(lang, server.enabled), server.enabled ? 'success' : 'inactive'),
+      membershipRow,
       row(text(lang, 'tools'), `${server.tools.length} ${text(lang, 'toolCount')}`),
       server.error !== undefined && h(
         Box,
@@ -119,14 +149,27 @@ export function renderServerDetailView({
     const selectedToolIndex = clamp(toolIndex, server.tools.length)
     const tool = server.tools[selectedToolIndex]!
     if (!toolDetailOpen) {
-      const capacity = Math.max(1, detailScrollHeight - 1)
-      const visible = indexedWindow(server.tools, selectedToolIndex, capacity)
+      const capacity = Math.max(1, detailScrollHeight - 3)
+      const selectedPosition = Math.max(0, filteredToolIndices.indexOf(selectedToolIndex))
+      const visible = indexedWindow(filteredToolIndices, selectedPosition, capacity)
       return h(
         React.Fragment,
         null,
-        h(Text, { bold: true, color: 'permission' }, `${text(lang, 'toolList')}  ${server.tools.length}`),
-        ...visible.items.map((item, offset) => {
-          const index = visible.start + offset
+        h(
+          Box,
+          { flexDirection: 'row', width: '100%', height: 1 },
+          h(Text, { bold: true, color: 'permission' }, `${text(lang, 'toolList')}  ${filteredToolIndices.length}/${server.tools.length}`),
+        ),
+        h(SceneSearchInput, {
+          React,
+          ui,
+          query: toolFilter,
+          cursor: toolSearchCursor,
+          beginSearch: beginToolSearch,
+        }),
+        filteredToolIndices.length === 0 && h(Text, { color: 'warning' }, text(lang, 'noMatches')),
+        ...visible.items.map((index) => {
+          const item = server.tools[index]!
           const selectedItem = index === selectedToolIndex
           const focused = selectedItem && focusArea === 'detail'
           return h(
@@ -191,12 +234,12 @@ export function renderServerDetailView({
         h(
           Box,
           { flexDirection: 'row' },
-          h(Text, { color: check.state === 'pass' ? 'success' : check.state === 'warn' ? 'warning' : 'error' },
-            `${check.state === 'pass' ? '\u2713' : check.state === 'warn' ? '!' : '\u2717'} `,
+          h(Text, { color: check.state === 'pass' ? 'success' : check.state === 'warn' ? 'warning' : check.state === 'skip' ? 'subtle' : 'error' },
+            `${check.state === 'pass' ? '\u2713' : check.state === 'warn' ? '!' : check.state === 'skip' ? '\u2013' : '\u2717'} `,
           ),
           h(Text, { bold: true }, doctorCheckLabel(lang, check.id)),
         ),
-        h(Text, { color: 'subtle', wrap: 'wrap' }, check.detail),
+        h(Text, { color: 'subtle', wrap: 'wrap' }, doctorCheckDetail(lang, check)),
         check.suggestion !== undefined && h(
           Box,
           { flexDirection: 'row', marginTop: 1, paddingLeft: 2 },

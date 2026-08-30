@@ -6,6 +6,7 @@ import type {
   ServerEditorState,
   ServerTextField,
 } from './scene-model.js'
+import { terminalTextWidth, textCursorSegments, truncateTerminalText } from './scene-model.js'
 
 interface ServerEditorViewProps {
   React: TuiSceneProps['React']
@@ -14,6 +15,7 @@ interface ServerEditorViewProps {
   snapshot: McpManagerSnapshot | undefined
   editor: ServerEditorState
   rows: readonly ServerEditorRow[]
+  rowWidth: number
   activateRow(index: number): void
 }
 
@@ -37,6 +39,52 @@ function serverFieldLabel(lang: SceneLanguage, field: ServerTextField): string {
   }
 }
 
+function serverFieldRequired(field: ServerTextField): boolean {
+  return field === 'id'
+    || field === 'serverName'
+    || field === 'command'
+    || field === 'url'
+    || field === 'toolCallTimeoutMs'
+    || field === 'reconnectInitialDelayMs'
+    || field === 'reconnectMaxDelayMs'
+    || field === 'reconnectMaxAttempts'
+}
+
+function serverFieldHelpKey(field: ServerTextField) {
+  switch (field) {
+    case 'id': return 'helpServerId'
+    case 'displayName': return 'helpDisplayName'
+    case 'serverName': return 'helpServerName'
+    case 'command': return 'helpCommand'
+    case 'args': return 'helpArguments'
+    case 'cwd': return 'helpWorkingDirectory'
+    case 'env': return 'helpEnvironment'
+    case 'secretEnv': return 'helpSecretEnv'
+    case 'url': return 'helpEndpoint'
+    case 'headers': return 'helpHeaders'
+    case 'secretHeaders': return 'helpSecretHeaders'
+    case 'toolCallTimeoutMs': return 'helpTimeout'
+    case 'reconnectInitialDelayMs': return 'helpReconnectInitialDelay'
+    case 'reconnectMaxDelayMs': return 'helpReconnectMaxDelay'
+    case 'reconnectMaxAttempts': return 'helpReconnectMaxAttempts'
+  }
+}
+
+export function serverEditorSelectionHelp(
+  lang: SceneLanguage,
+  editor: ServerEditorState,
+  rows: readonly ServerEditorRow[],
+): string {
+  const row = rows[editor.selected]
+  if (row?.kind === 'field') return text(lang, serverFieldHelpKey(row.field))
+  if (row?.kind === 'transport') return text(lang, 'helpTransport')
+  if (row?.kind === 'boolean') {
+    return text(lang, row.field === 'failOnStartupError' ? 'helpFailStartup' : 'helpReconnectEnabled')
+  }
+  if (row?.kind === 'credential') return text(lang, 'helpCredentialValue').replace('{ref}', row.ref)
+  return text(lang, row?.kind === 'save' ? 'helpSave' : 'helpCancel')
+}
+
 function isCredentialConfigured(snapshot: McpManagerSnapshot | undefined, ref: string): boolean {
   return (snapshot?.servers ?? []).some((server: McpServerView) => {
     const entries = [
@@ -54,6 +102,7 @@ export function renderServerEditorView({
   snapshot,
   editor,
   rows,
+  rowWidth,
   activateRow,
 }: ServerEditorViewProps) {
   const { Box, Text } = ui
@@ -85,17 +134,38 @@ export function renderServerEditorView({
       const marker = h(Text, { color: focused ? undefined : 'subtle' }, focused ? '❯ ' : '  ')
       if (item.kind === 'field') {
         const editing = editor.editing?.kind === 'field' && editor.editing.field === item.field
+          ? editor.editing
+          : undefined
         const value = editor.draft[item.field]
+        const required = serverFieldRequired(item.field)
+        const label = `${serverFieldLabel(lang, item.field)}: `
+        const action = text(lang, 'editValue')
+        const valueWidth = Math.max(8, rowWidth - terminalTextWidth(label) - 4
+          - (editing === undefined && item.editable ? terminalTextWidth(action) + 1 : 0))
+        const cursor = editing === undefined
+          ? undefined
+          : textCursorSegments(value, editing.cursor, valueWidth)
         return h(
           Box,
           common,
           marker,
-          h(Text, { color: 'permission' }, `${serverFieldLabel(lang, item.field)}: `),
-          h(Text, { bold: focused, color: item.editable ? undefined : 'subtle', wrap: 'truncate-end' },
-            `${value || text(lang, 'valueEmpty')}${editing ? '▍' : ''}`,
+          h(Text, { color: required && value.trim() === '' ? 'error' : 'warning' }, required ? '* ' : '  '),
+          h(Text, { color: 'permission' }, label),
+          h(Text, {
+            bold: focused,
+            color: !item.editable ? 'subtle' : required && value.trim() === '' ? 'error' : undefined,
+            wrap: 'truncate-end',
+          },
+            editing === undefined
+              ? truncateTerminalText(value || text(lang, 'valueEmpty'), valueWidth)
+              : h(React.Fragment, null,
+                  cursor?.before,
+                  h(Text, { inverse: true }, cursor?.cursor),
+                  cursor?.after,
+                ),
           ),
           h(Box, { flexGrow: 1 }),
-          item.editable && h(Text, { color: 'subtle' }, text(lang, 'editValue')),
+          editing === undefined && item.editable && h(Text, { color: 'subtle' }, action),
         )
       }
       if (item.kind === 'transport') {
@@ -103,6 +173,7 @@ export function renderServerEditorView({
           Box,
           common,
           marker,
+          h(Text, null, '  '),
           h(Text, { color: 'permission' }, `${text(lang, 'transport')}: `),
           h(Text, { bold: focused }, editor.draft.transport),
           h(Box, { flexGrow: 1 }),
@@ -115,23 +186,40 @@ export function renderServerEditorView({
           Box,
           common,
           marker,
+          h(Text, null, '  '),
           h(Text, { color: 'permission' }, `${text(lang, item.field === 'failOnStartupError' ? 'failStartup' : 'reconnectEnabled')}: `),
           h(Text, { color: enabled ? 'success' : 'inactive', bold: focused }, text(lang, enabled ? 'enabled' : 'disabled')),
+          h(Box, { flexGrow: 1 }),
+          h(Text, { color: 'subtle' }, text(lang, 'toggleOption')),
         )
       }
       if (item.kind === 'credential') {
         const editing = editor.editing?.kind === 'credential' && editor.editing.ref === item.ref
+          ? editor.editing
+          : undefined
         const pending = editor.draft.credentialValues[item.ref]
         const status = pending !== undefined
           ? text(lang, 'credentialPending')
           : text(lang, isCredentialConfigured(snapshot, item.ref) ? 'credentialConfigured' : 'credentialMissing')
+        const label = `${text(lang, 'credentialValue')} ${item.ref}: `
+        const valueWidth = Math.max(8, rowWidth - terminalTextWidth(label) - 4)
+        const cursor = editing === undefined
+          ? undefined
+          : textCursorSegments(pending ?? '', editing.cursor, valueWidth, true)
         return h(
           Box,
           common,
           marker,
-          h(Text, { color: 'permission' }, `${text(lang, 'credentialValue')} ${item.ref}: `),
+          h(Text, { color: 'warning' }, '* '),
+          h(Text, { color: 'permission' }, label),
           h(Text, { color: pending !== undefined ? 'warning' : 'subtle', bold: focused },
-            editing ? `${'•'.repeat(Math.min(12, pending?.length ?? 0))}▍` : status,
+            editing === undefined
+              ? status
+              : h(React.Fragment, null,
+                  cursor?.before,
+                  h(Text, { inverse: true }, cursor?.cursor),
+                  cursor?.after,
+                ),
           ),
         )
       }

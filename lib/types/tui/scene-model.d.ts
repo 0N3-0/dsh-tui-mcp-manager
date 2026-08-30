@@ -26,6 +26,11 @@ export type SetEditorRow = {
     field: 'id' | 'name';
     editable: boolean;
 } | {
+    kind: 'boolean';
+    field: 'active';
+} | {
+    kind: 'search';
+} | {
     kind: 'member';
     server: McpServerView;
 } | {
@@ -33,11 +38,19 @@ export type SetEditorRow = {
 } | {
     kind: 'cancel';
 };
+export interface SetEditorDraft extends ManagedSetRecord {
+    active: boolean;
+}
 export interface SetEditorState {
     mode: 'create' | 'edit';
-    draft: ManagedSetRecord;
+    draft: SetEditorDraft;
     selected: number;
-    editing?: 'id' | 'name';
+    memberFilter: string;
+    memberSearchCursor?: number;
+    editing?: {
+        field: 'id' | 'name';
+        cursor: number;
+    };
     error?: string;
 }
 export type ServerTextField = 'id' | 'displayName' | 'serverName' | 'command' | 'args' | 'cwd' | 'env' | 'secretEnv' | 'url' | 'headers' | 'secretHeaders' | 'toolCallTimeoutMs' | 'reconnectInitialDelayMs' | 'reconnectMaxDelayMs' | 'reconnectMaxAttempts';
@@ -66,9 +79,11 @@ export interface ServerEditorState {
     editing?: {
         kind: 'field';
         field: ServerTextField;
+        cursor: number;
     } | {
         kind: 'credential';
         ref: string;
+        cursor: number;
     };
     error?: string;
 }
@@ -77,7 +92,25 @@ export declare const TABS: readonly SceneTab[];
 export declare const WORKSPACES: readonly Workspace[];
 export declare function clamp(index: number, length: number): number;
 export declare function nextSetId(snapshot: McpManagerSnapshot): string;
-export declare function removeLastCodePoint(value: string): string;
+export declare function matchesSearch(query: string, ...values: Array<string | undefined>): boolean;
+export declare function matchesNavItem(query: string, item: NavItem): boolean;
+export interface TextCursorUpdate {
+    value: string;
+    cursor: number;
+}
+export declare function textCursorEnd(value: string): number;
+export declare function clampTextCursor(value: string, cursor: number): number;
+export declare function insertAtTextCursor(value: string, cursor: number, inserted: string, limit: number): TextCursorUpdate;
+export declare function removeBeforeTextCursor(value: string, cursor: number): TextCursorUpdate;
+export declare function removeAtTextCursor(value: string, cursor: number): TextCursorUpdate;
+export declare function terminalTextWidth(value: string): number;
+export declare function truncateTerminalText(value: string, maxWidth: number): string;
+export interface TextCursorSegments {
+    before: string;
+    cursor: string;
+    after: string;
+}
+export declare function textCursorSegments(value: string, cursor: number, maxWidth?: number, masked?: boolean): TextCursorSegments;
 export declare function navWindow(items: readonly NavItem[], selected: number, limit: number): readonly NavItem[];
 export interface IndexedWindow<T> {
     start: number;

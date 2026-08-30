@@ -6,17 +6,10 @@
 
 English | [中文](README.md)
 
-A native MCP server manager inside [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
-Run `/mcp-manager` to open a full-screen control center for server configuration, Set orchestration,
-runtime diagnostics, tool schemas, and credential references.
+Manage MCP servers, Sets, tools, and runtime state inside [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
+Run `/mcp-manager` to open the full-screen interface without leaving the terminal.
 
-- Native full-screen Scene with every operation kept inside the terminal
-- Uses the active profile's `cordis.patch.yml` instead of a second server database
-- Supports both `stdio` and `streamable-http`
-- Switches groups of MCP servers through Sets; shared members start only once
-- Stores sensitive values through DSH credentials, never in the profile patch
-
-## Quick Start
+## Install
 
 Requires Node.js `^22.19 || >=24` and dsh-TUI `>=0.9.3 <0.10.0`.
 
@@ -25,119 +18,87 @@ dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
 dsh --profile dsh-tui
 ```
 
-Then run inside the TUI:
+Run `/mcp-manager` inside the TUI. The interface follows dsh-TUI's language setting; use `/lang zh` or `/lang en` to switch.
 
-```text
-/mcp-manager
-```
-
-Essential controls:
-
-| Key | Action |
-| --- | --- |
-| `Tab` | Move focus between navigation and details |
-| `↑` / `↓` | Select a node, action, field, or tool |
-| `←` / `→` | Switch detail tabs |
-| `Enter` | Open, edit, or confirm the selected item |
-| `Esc` | Go back or cancel the current form |
-| `w` | Switch between Set and server-pool workspaces |
-
-The interface follows dsh-TUI's language setting. Use `/lang zh` or `/lang en` to change it.
-
-## Interface Preview
+## Preview
 
 ![MCP server overview](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-servers.png)
+
+<details>
+<summary>More screenshots</summary>
 
 [Set management](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-sets.png) ·
 [Tools and schemas](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-tools.png) ·
 [Create a Set](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-set-editor.png) ·
 [Create a server](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-server-editor.png)
 
-## What It Does
+</details>
 
-### Manage servers
+## Highlights
 
-- Create, duplicate, edit, reconnect, and delete MCP servers
-- Configure commands, arguments, working directories, environment variables, headers, and endpoints
-- Configure tool timeouts, startup-failure policy, and automatic reconnect behavior
-- Delete a server globally and clean up its references from every Set
-- Use the same navigation model at 60, 80, and 120 columns; long content scrolls only in the right pane
+| Area | Capabilities |
+| --- | --- |
+| Server pool | Create, duplicate, edit, stop, reconnect, and globally delete servers |
+| MCP Sets | Organize members, control runtime and startup state, and deduplicate shared servers |
+| Tools | Inspect descriptions and input schemas; search by name or description |
+| Diagnostics | Automatically check configuration, connectivity, runtime state, and tools |
+| Credentials | Reference sensitive environment variables and headers through DSH credentials |
 
-### Orchestrate MCP Sets
+Server, Set, and tool lists all support `/` search. Server overviews list every containing Set: `◆` is active and `◇` is inactive.
 
-A Set contains existing server IDs and never duplicates server configuration. Each Set can be enabled
-independently, while the effective runtime state is the union of all active Set members:
+### How Sets work
 
-```text
-Active Set A: context7, websearch
-Active Set B: websearch, ghgrep
-Actually run: context7, websearch, ghgrep
-```
-
-A shared server therefore still maps to one Loader row and starts only once. When no Sets exist, the
-plugin creates a `Default` Set containing all current MCP servers. Once saved, it behaves exactly like
-any other Set.
-
-### Inspect tools and run automatic diagnostics
-
-- The Tools tab shows registered tools, descriptions, and complete input schemas
-- The Doctor tab automatically checks Loader/Fiber state, executable or URL, working directory,
-  credentials, runtime state, and tool count when opened
-- Failed checks include targeted remediation
-- Retesting reuses Loader/HMR and does not establish another MCP connection
-
-## Configuration and Data Safety
-
-The active profile's `cordis.patch.yml` remains the source of truth for servers:
+The effective server list is the union of all active Sets. Shared members start only once:
 
 ```text
-Full-screen MCP manager
-    -> atomic managed-block update
-$DSH_HOME/profiles/dsh-tui/cordis.patch.yml
-    -> DSH patch watcher
-Cordis Loader / HMR
-    -> @deepseek-ai/dsh-mcp-client
+Set A: context7, websearch
+Set B: websearch, ghgrep
+Run:   context7, websearch, ghgrep
 ```
 
-Set definitions live in `mcp-manager.sets.yml` under the same profile and contain only Set metadata and
-server IDs. Both files use a sidecar lock, same-directory temporary file, `fsync`, and atomic rename.
-The plugin modifies only the marker block below; patches, comments, and `!!js` expressions outside it
-are preserved:
+On first use, a `Default` Set is created from existing MCP servers; after saving, it is an ordinary Set. Stopping a server affects only the current process and never changes Set membership. Resume it in place at any time.
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| `Tab` | Switch focus between navigation and details |
+| `↑` / `↓` | Select a node, action, field, or tool |
+| `←` / `→` | Switch detail tabs or move the input cursor |
+| `Enter` | Open, edit, or confirm |
+| `/` | Search the current list |
+| `w` | Switch between Sets and the server pool |
+| `Esc` | Go back or cancel |
+
+## Configuration and Safety
+
+- Server configuration is read from and written to the active profile's `cordis.patch.yml`; there is no second database.
+- Sets live in `mcp-manager.sets.yml` beside the patch and contain only Set metadata and server IDs.
+- Writes use a sidecar lock, `fsync`, and atomic rename; content outside the managed block is preserved.
+- Globally deleting a server also removes its references from every Set.
+- Sensitive values go only to the credentials provider; configuration stores references.
+
+<details>
+<summary>Diagnostics and runtime behavior</summary>
+
+The Diagnostics tab checks Loader/Fiber state, executable or URL, working directory, credentials, connectivity, and tool count. A server outside the active Set union temporarily enables its existing Loader configuration for the handshake, reads its state, and stops immediately afterward without changing Sets or files.
+
+**Stop server** also disables only the in-memory Loader row. A configuration or profile reload clears that temporary state.
+
+</details>
+
+<details>
+<summary>Managed configuration and credential references</summary>
+
+The plugin modifies only the block between these markers in `cordis.patch.yml`. Legacy markers, row prefixes, and metadata keys remain compatible.
 
 ```yaml
 # >>> dsh-mcp-manager: managed MCP server rows >>>
-- insert:
-    - id: mcp-manager--filesystem
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        transport: stdio
-        serverName: filesystem
-        command: npx
-        args: ['-y', '@modelcontextprotocol/server-filesystem', /workspace]
-        env: {}
-        cwd: ''
-      x-dsh-mcp-manager:
-        id: filesystem
-        name: Filesystem
+# managed MCP server rows
 # <<< dsh-mcp-manager: managed MCP server rows <<<
 ```
 
-Legacy markers, row prefixes, and metadata keys remain compatible, so existing servers do not need a
-manual migration.
-
-### Credential references
-
-Regular fields pass directly to the official MCP client. Sensitive environment variables and headers
-store only a DSH credential reference in the patch. For example, a Context7 header can be configured as:
-
-```text
-Transport:          streamable-http
-URL:                https://mcp.context7.com/mcp
-Secret header:      api-key=MY_CONTEXT7_KEY
-Credential value:   <your key>
-```
-
-Only the reference appears in the profile patch:
+Sensitive fields leave only a reference in the patch:
 
 ```yaml
 secretHeaders:
@@ -146,24 +107,20 @@ secretHeaders:
     prefix: ''
 ```
 
-Credential values are masked while entered and never exposed in server summaries, profile patches, or
-RPC snapshots.
+Values never appear in server summaries, profile patches, or RPC snapshots.
+
+</details>
 
 ## Update and Uninstall
 
-Run the install command again to install the current npm version:
-
-```sh
-dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
-```
-
-To uninstall:
+Run the install command again to update. To uninstall:
 
 ```sh
 dsh plugin --profile dsh-tui remove dsh-tui-mcp-manager
 ```
 
-## Development From Source
+<details>
+<summary>Develop from source</summary>
 
 ```sh
 git clone https://github.com/0N3-0/dsh-tui-mcp-manager.git
@@ -173,34 +130,23 @@ pnpm check
 dsh plugin --profile dsh-tui add .
 ```
 
-Local `add .` is for development and integration testing. Regular users do not need to clone or build
-the repository, run `pnpm approve-builds`, or edit the profile's `allowBuilds` setting.
-
-Common checks:
+Common release checks:
 
 ```sh
-pnpm typecheck
-pnpm build
-pnpm verify
+pnpm check
 npm pack --dry-run
 pnpm smoke:package
 ```
 
-`smoke:package` creates a real tarball, installs it in a temporary consumer project, and verifies the
-bundle patch, manifest, runtime files, root entry, and server entry.
+Local `add .` is only for development. Regular users do not need to clone or build the repository.
 
-## Compatibility and Release Contract
+</details>
 
-- MIT licensed, pure ESM, semantic versioning, and committed build output shipped through npm
-- The root entry follows the Cordis `name`, `Config`, and `apply` contract with no default export
-- `dsh-plugin.json` follows the community manifest v0.15 experimental draft
-- The UI registers only through the dsh-TUI Scene API; no unusable command is registered without it
-- Registrations and child Fibers follow the Cordis lifecycle and are cleaned up on unload
-- GitHub Releases publish through npm Trusted Publishing with GitHub Actions OIDC and no long-lived token
+## Compatibility
 
-dsh-TUI 0.9.3 is the current build and runtime validation baseline. Manifest permissions are host audit
-and policy declarations, not an operating-system sandbox. The plugin runs in the host process, so
-installation means trusting it with the current user's profile patch and credentials provider access.
+dsh-TUI 0.9.3 is the current build and runtime baseline. The package is pure ESM, MIT licensed, and published through GitHub Actions OIDC Trusted Publishing.
+
+The plugin runs in the host process. Manifest permissions are audit and policy declarations, not an operating-system sandbox.
 
 ## License
 
