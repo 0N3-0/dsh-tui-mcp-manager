@@ -11,7 +11,7 @@
 
 ## 安装
 
-需要 Node.js `^22.19 || >=24` 和 dsh-TUI `>=0.9.3 <0.10.0`。
+需要 Node.js `^22.19 || >=24` 和 dsh-TUI `>=0.9.3 <0.11.0`。
 
 ```sh
 dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
@@ -144,7 +144,7 @@ pnpm smoke:package
 
 ## 兼容性
 
-当前构建与运行基线为 dsh-TUI 0.9.3。项目采用纯 ESM 和 MIT 许可证；发布由 GitHub Actions OIDC Trusted Publishing 完成。
+当前构建与运行基线为 dsh-TUI 0.10.1 与 dsh 0.1.5-rc.2。项目采用纯 ESM 和 MIT 许可证；发布由 GitHub Actions OIDC Trusted Publishing 完成。
 
 插件运行在宿主进程内。manifest 权限用于宿主审计与策略声明，不是操作系统安全沙箱。
 

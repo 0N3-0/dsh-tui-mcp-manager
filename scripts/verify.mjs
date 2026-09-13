@@ -19,12 +19,12 @@ assert.equal(manifest.facets.host.entry, 'lib/types/index.js')
 assert.equal(manifest.contributes.commands[0].id, 'dsh-tui.mcp-manager')
 assert.equal(manifest.permissions[0].name, 'commands.invoke')
 assert.equal(manifest.permissions[0].scope, 'dsh-tui.mcp-manager')
-assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.3 <0.10.0')
+assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.3 <0.11.0')
 
 assert.equal(pkg.main, `./${manifest.facets.host.entry}`)
 assert.equal(pkg.exports['.'].import, pkg.main)
 assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.3')
+assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.3 || ^0.10.0')
 assert.equal(pkg.scripts.prepare, undefined)
 assert.equal(pkg.scripts.prepack, 'npm run check')
 assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs')
@@ -110,6 +110,27 @@ const subscribeOffset = sceneControllerEntry.indexOf('manager.subscribe', sceneS
 assert.ok(sceneStartOffset >= 0 && initialRefreshOffset > sceneStartOffset && subscribeOffset > initialRefreshOffset)
 const managerEntry = await readFile(new URL('../lib/types/host/manager.js', import.meta.url), 'utf8')
 assert.match(managerEntry, /subscribe\(listener\)/)
+
+// Host-API compatibility shims: each must stay active on the line it targets
+// and inert on the other, so both event generations and both RPC signatures
+// keep working from one build.
+{
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { onCredentialReferenceUpdated, registerLoopbackRpcChannel } = await import('../lib/types/host/compat.js')
+  const ctx = new Context()
+  const seen = []
+  onCredentialReferenceUpdated(ctx, (ref) => seen.push(ref))
+  ctx.emit('credentials/reference-updated', 'new-line')
+  ctx.emit('credentials/updated', 'legacy-line')
+  assert.deepEqual(seen, ['new-line', 'legacy-line'])
+  const calls = []
+  const connection = { rpc: { handle: (...args) => { calls.push(args); return () => {} } } }
+  registerLoopbackRpcChannel(connection, '/probe', async () => ({ ok: true }))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], '/probe')
+  assert.equal(typeof calls[0][1], 'function')
+  assert.deepEqual(calls[0][2], { authority: 'loopback' })
+}
 const presentation = await import('../lib/types/tui/presentation.js')
 const sceneI18n = await import('../lib/types/tui/scene-i18n.js')
 const sceneModel = await import('../lib/types/tui/scene-model.js')

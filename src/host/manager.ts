@@ -1,6 +1,9 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
+import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { type SettingsScope } from '@deepseek-ai/dsh-settings'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
@@ -11,6 +14,7 @@ import {
   normalizeServerRecord,
   validateMcpManagerSettings,
 } from './schema.js'
+import { registerLoopbackRpcChannel, type ConnectionRpcFace } from './compat.js'
 import { detectProfile, type ProfileIdentity } from './profile.js'
 import { loaderRowId, ProfilePatchStore, toLoaderEntry, type PatchStoreSnapshot } from './patch-store.js'
 import {
@@ -49,22 +53,22 @@ interface RuntimeRecord {
   updatedAt: number
 }
 
-interface LoaderEntryFace {
-  options: {
-    id: string
-    name: string
-    disabled?: boolean
-    config?: unknown
-  }
-  fiber?: {
-    uid: number | null
-    /** Cordis FiberState: PENDING=0, LOADING=1, ACTIVE=2. */
-    state: number
-  }
-  update(options: Record<string, unknown>, create?: boolean, force?: boolean): Promise<void>
-}
+/**
+ * Minimal view of a Cordis Loader row. Derived from the official Entry type so
+ * a loader-signature drift fails this package's typecheck instead of surfacing
+ * as a runtime surprise.
+ */
+type LoaderEntryFace = Pick<Entry, 'options' | 'fiber' | 'update'>
 
 const FIBER_STATE_ACTIVE = 2
+
+function toolView(schema: ToolSchema): McpToolView {
+  return {
+    name: schema.name,
+    description: schema.description,
+    parameters: (schema.parameters ?? {}) as Record<string, unknown>,
+  }
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -146,7 +150,7 @@ export class McpManagerService extends Service {
   /** Register the old section read-only so an existing install can migrate once. */
   private installLegacySettingsMigration(): void {
     this.ctx.inject(['settings'], (settingsCtx) => {
-      const scope = settingsCtx.settings.register(settingsNamespace(LEGACY_SETTINGS_NAMESPACE), McpManagerSettingsSchema, {
+      const scope = settingsCtx.settings.register(LEGACY_SETTINGS_NAMESPACE, McpManagerSettingsSchema, {
         applies: 'restart',
         validate: validateMcpManagerSettings,
       })
@@ -158,11 +162,16 @@ export class McpManagerService extends Service {
     })
   }
 
+  /** Typed view of the injected ToolRuntime (also loads its Context augmentation). */
+  private get tools(): ToolRuntime {
+    return this.ctx.tools
+  }
+
   private installToolRegistryTracking(): void {
     this.ctx.on('tools/change', () => {
-      const schemas = this.ctx.tools.schemas()
+      const toolsByServer = this.toolsByServer([...this.records.values()].map((record) => record.config.serverName))
       for (const record of this.records.values()) {
-        this.refreshTools(record, schemas)
+        this.refreshTools(record, toolsByServer.get(record.config.serverName) ?? [])
       }
     })
   }
@@ -183,10 +192,12 @@ export class McpManagerService extends Service {
 
   private installRpcChannel(): void {
     this.ctx.inject(['connection'], (connCtx) => {
-      const connection = (connCtx as any).connection
-      connection.rpc.handle(
+      const connection = (connCtx as unknown as { connection?: ConnectionRpcFace }).connection
+      if (connection === undefined) return
+      registerLoopbackRpcChannel(
+        connection,
         RPC_CHANNEL,
-        async (endpoint: string, payload: unknown) => {
+        async (endpoint, payload) => {
           try {
             return { ok: true as const, value: await this.dispatchRpc(endpoint, payload) }
           } catch (error) {
@@ -201,7 +212,6 @@ export class McpManagerService extends Service {
             }
           }
         },
-        { authority: 'loopback' },
       )
     })
   }
@@ -295,7 +305,7 @@ export class McpManagerService extends Service {
   }
 
   private loaderEntries(): LoaderEntryFace[] {
-    return [...((this.ctx as any).loader as { entries(): Iterable<LoaderEntryFace> }).entries()]
+    return [...this.ctx.loader.entries()]
   }
 
   private loaderEntry(id: string): LoaderEntryFace | undefined {
@@ -351,7 +361,7 @@ export class McpManagerService extends Service {
       }
     }
 
-    const toolSchemas = this.ctx.tools.schemas()
+    const toolsByServer = this.toolsByServer(snapshot.servers.map((server) => server.serverName))
     for (const config of snapshot.servers) {
       const fingerprint = stable(config)
       let record = this.records.get(config.id)
@@ -379,7 +389,7 @@ export class McpManagerService extends Service {
 
       const stateBeforeProjection = record.state
       const errorBeforeProjection = record.error
-      this.refreshTools(record, toolSchemas)
+      this.refreshTools(record, toolsByServer.get(config.serverName) ?? [])
       if (!config.enabled) {
         this.temporarilyStoppedIds.delete(config.id)
         record.state = 'disabled'
@@ -419,21 +429,40 @@ export class McpManagerService extends Service {
     this.bumpRevision()
   }
 
-  private toolsFor(serverName: string, schemas = this.ctx.tools.schemas()): McpToolView[] {
+  private toolsFor(serverName: string, schemas = this.tools.schemas()): McpToolView[] {
     const prefix = `mcp__${serverName}__`
     return schemas
       .filter((schema) => schema.name.startsWith(prefix))
-      .map((schema) => ({
-        name: schema.name,
-        description: schema.description,
-        parameters: (schema.parameters ?? {}) as Record<string, unknown>,
-      }))
+      .map((schema) => toolView(schema))
+  }
+
+  /**
+   * Project one registry snapshot for every known server in a single scan.
+   * Matching stays a `startsWith` against the full `mcp__<server>__` prefix —
+   * never a split of the public name — and the longest name wins so a server
+   * whose name itself contains `__` still owns its own tools.
+   */
+  private toolsByServer(serverNames: Iterable<string>): Map<string, McpToolView[]> {
+    const grouped = new Map<string, McpToolView[]>()
+    for (const serverName of serverNames) grouped.set(serverName, [])
+    const names = [...grouped.keys()].sort((left, right) => right.length - left.length)
+    for (const schema of this.tools.schemas()) {
+      for (const serverName of names) {
+        if (!schema.name.startsWith(`mcp__${serverName}__`)) continue
+        grouped.get(serverName)!.push(toolView(schema))
+        break
+      }
+    }
+    return grouped
+  }
+
+  private registryTools(record: RuntimeRecord): McpToolView[] {
+    return this.toolsFor(record.config.serverName)
   }
 
   /** Reconcile the cached view with the native registry without inventing a state transition. */
-  private refreshTools(record: RuntimeRecord, schemas = this.ctx.tools.schemas()): void {
-    const tools = this.toolsFor(record.config.serverName, schemas)
-    if (stable(record.tools) === stable(tools)) return
+  private refreshTools(record: RuntimeRecord, tools = this.registryTools(record)): void {
+    if (record.tools.length === tools.length && stable(record.tools) === stable(tools)) return
     record.tools = tools
     this.touch(record)
   }
@@ -925,11 +954,11 @@ export class McpManagerService extends Service {
     return result
   }
 
-  private async viewFor(record: RuntimeRecord, toolSchemas = this.ctx.tools.schemas()): Promise<McpServerView> {
+  private async viewFor(record: RuntimeRecord, tools = this.registryTools(record)): Promise<McpServerView> {
     // Registry events can race record creation during profile startup. A
     // snapshot therefore performs one cheap authoritative reconciliation as
     // well as relying on tools/change for normal updates.
-    this.refreshTools(record, toolSchemas)
+    this.refreshTools(record, tools)
     const config = cloneServerRecord(record.config)
     const secretHeaderEntries = Object.entries(normalizeSecretHeaderEntries(config.secretHeaders))
     const credentialRefs = new Set([
@@ -993,7 +1022,7 @@ export class McpManagerService extends Service {
       active: setStorage.activeSetIds.includes(set.id),
     }))
     const activeSetIds = sets.filter((set) => set.active).map((set) => set.id)
-    const toolSchemas = this.ctx.tools.schemas()
+    const toolsByServer = this.toolsByServer([...this.records.values()].map((record) => record.config.serverName))
     return {
       revision: this.revision,
       profile: { key: this.profile.key, source: this.profile.source },
@@ -1003,7 +1032,9 @@ export class McpManagerService extends Service {
         ...(this.store === undefined ? {} : { path: this.store.path }),
         managedBlock: storage?.hasManagedBlock ?? false,
       },
-      servers: await Promise.all([...this.records.values()].map((record) => this.viewFor(record, toolSchemas))),
+      servers: await Promise.all([...this.records.values()].map((record) => (
+        this.viewFor(record, toolsByServer.get(record.config.serverName) ?? [])
+      ))),
       sets,
       activeSetIds,
     }

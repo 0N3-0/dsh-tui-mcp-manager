@@ -33,6 +33,8 @@ export declare class McpManagerService extends Service {
     private bumpRevision;
     /** Register the old section read-only so an existing install can migrate once. */
     private installLegacySettingsMigration;
+    /** Typed view of the injected ToolRuntime (also loads its Context augmentation). */
+    private get tools();
     private installToolRegistryTracking;
     private installPatchFailureTracking;
     private installRpcChannel;
@@ -50,6 +52,14 @@ export declare class McpManagerService extends Service {
     private syncFromFile;
     private touch;
     private toolsFor;
+    /**
+     * Project one registry snapshot for every known server in a single scan.
+     * Matching stays a `startsWith` against the full `mcp__<server>__` prefix —
+     * never a split of the public name — and the longest name wins so a server
+     * whose name itself contains `__` still owns its own tools.
+     */
+    private toolsByServer;
+    private registryTools;
     /** Reconcile the cached view with the native registry without inventing a state transition. */
     private refreshTools;
     /** Start one existing Loader row in memory and wait for activation. */

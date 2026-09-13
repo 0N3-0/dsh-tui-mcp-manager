@@ -2,6 +2,7 @@ import type { Context, Fiber } from '@deepseek-ai/cordis'
 import * as mcpClientModule from '@deepseek-ai/dsh-mcp-client'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type Schema from '@deepseek-ai/schemastery'
+import { onCredentialReferenceUpdated } from '../host/compat.js'
 import {
   ManagedMcpServerConfigSchema,
   normalizeSecretHeaderEntries,
@@ -113,7 +114,7 @@ export async function apply(ctx: Context, input: unknown): Promise<void> {
     return run
   }
 
-  ctx.on('credentials/updated', (ref) => {
+  onCredentialReferenceUpdated(ctx, (ref) => {
     if (usesCredential(config, ref)) void enqueueRestart()
   })
 
