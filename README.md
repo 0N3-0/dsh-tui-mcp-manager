@@ -11,7 +11,7 @@
 
 ## 安装
 
-需要 Node.js `^22.19 || >=24` 和 dsh-TUI `>=0.9.3 <0.11.0`。
+需要 Node.js `^22.19 || >=24`、dsh `0.2.0-rc.1` 和 dsh-TUI `>=0.11.2 <0.12.0`。
 
 ```sh
 dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
@@ -77,6 +77,7 @@ Set B: websearch, ghgrep
 - 写入使用旁路锁、`fsync` 和原子 rename；managed block 外的内容保持不变。
 - 删除服务器时会同步清理所有 Set 引用。
 - 敏感值只写入 credentials provider，配置文件中仅保留引用。
+- 升级旧版 dsh 时，如果 profile 尚无 managed block，会从保留的 `settings.yaml` 或 `settings.yaml.imported` 一次性导入旧 MCP 配置。
 
 <details>
 <summary>诊断与运行时细节</summary>
@@ -144,7 +145,7 @@ pnpm smoke:package
 
 ## 兼容性
 
-当前构建与运行基线为 dsh-TUI 0.10.1 与 dsh 0.1.5-rc.2。项目采用纯 ESM 和 MIT 许可证；发布由 GitHub Actions OIDC Trusted Publishing 完成。
+当前构建与运行基线为 dsh-TUI 0.11.2 与 dsh 0.2.0-rc.1。项目采用纯 ESM 和 MIT 许可证；发布由 GitHub Actions OIDC Trusted Publishing 完成。
 
 插件运行在宿主进程内。manifest 权限用于宿主审计与策略声明，不是操作系统安全沙箱。
 

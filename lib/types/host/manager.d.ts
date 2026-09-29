@@ -13,7 +13,6 @@ export declare class McpManagerService extends Service {
     private readonly profile;
     private readonly store?;
     private readonly setStore?;
-    private legacySettings?;
     private readonly records;
     private readonly changeListeners;
     private revision;
@@ -31,8 +30,6 @@ export declare class McpManagerService extends Service {
      */
     subscribe(listener: () => void): () => void;
     private bumpRevision;
-    /** Register the old section read-only so an existing install can migrate once. */
-    private installLegacySettingsMigration;
     /** Typed view of the injected ToolRuntime (also loads its Context augmentation). */
     private get tools();
     private installToolRegistryTracking;

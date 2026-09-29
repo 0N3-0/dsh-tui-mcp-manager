@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -19,12 +19,13 @@ assert.equal(manifest.facets.host.entry, 'lib/types/index.js')
 assert.equal(manifest.contributes.commands[0].id, 'dsh-tui.mcp-manager')
 assert.equal(manifest.permissions[0].name, 'commands.invoke')
 assert.equal(manifest.permissions[0].scope, 'dsh-tui.mcp-manager')
-assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.9.3 <0.11.0')
+assert.equal(manifest.compat.hosts[0], '@deepseek-harness-tui/dsh-tui >=0.11.2 <0.12.0')
 
 assert.equal(pkg.main, `./${manifest.facets.host.entry}`)
 assert.equal(pkg.exports['.'].import, pkg.main)
 assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.9.3 || ^0.10.0')
+assert.equal(pkg.peerDependencies['@deepseek-harness-tui/dsh-tui'], '^0.11.2')
+assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-mcp-client'], '0.2.0-rc.1')
 assert.equal(pkg.scripts.prepare, undefined)
 assert.equal(pkg.scripts.prepack, 'npm run check')
 assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs')
@@ -418,7 +419,7 @@ try {
     assert.equal(beforeExternalEdit.profile.key, 'external-edit')
     assert.equal(beforeExternalEdit.servers[0]?.name, 'Before external edit')
     assert.equal(beforeExternalEdit.servers.length, 2)
-    assert.equal(toolSchemaReads, 2, 'each manager projection must reuse one tool-registry snapshot across servers')
+    assert.equal(toolSchemaReads, 3, 'startup and list projections must reuse one tool-registry snapshot across servers')
 
     await new ProfilePatchStore(patchPath).write([{
       ...server,
@@ -523,6 +524,27 @@ try {
       manager.invoke('upsertSet', { set: setRecord, active: 'yes' }),
       /active must be a boolean/,
     )
+
+    // dsh-settings 0.2 archives settings.yaml before plugins start. A legacy
+    // MCP section must still migrate once when this profile has no managed block.
+    const legacyProfileDir = join(temp, 'profiles', 'legacy-import')
+    const legacyPatchPath = join(legacyProfileDir, 'cordis.patch.yml')
+    await mkdir(legacyProfileDir, { recursive: true })
+    await writeFile(legacyPatchPath, '[]\n')
+    await writeFile(join(temp, 'settings.yaml'), 'unrelated: true\n')
+    const legacyBackup = yaml.dump({
+      'mcp-manager': { profiles: { 'legacy-import': { servers: [server] } } },
+    })
+    await writeFile(join(temp, 'settings.yaml.imported'), legacyBackup)
+    const legacyCtx = new Context().extend({ baseUrl: pathToFileURL(`${legacyProfileDir}/`).href })
+    legacyCtx.provide('tools', { schemas: () => [] })
+    legacyCtx.provide('loader', { entries: () => [] })
+    const legacyManager = new McpManagerService(legacyCtx)
+    const imported = await legacyManager.invoke('list', {})
+    assert.deepEqual(imported.servers.map((item) => item.id), ['external'])
+    assert.match(await readFile(legacyPatchPath, 'utf8'), /managed MCP server rows/)
+    assert.equal(await readFile(join(temp, 'settings.yaml.imported'), 'utf8'), legacyBackup)
+    assert.deepEqual((await legacyManager.invoke('list', {})).servers.map((item) => item.id), ['external'])
   } finally {
     if (previousDshHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousDshHome

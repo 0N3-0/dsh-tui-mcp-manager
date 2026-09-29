@@ -11,7 +11,7 @@ Run `/mcp-manager` to open the full-screen interface without leaving the termina
 
 ## Install
 
-Requires Node.js `^22.19 || >=24` and dsh-TUI `>=0.9.3 <0.11.0`.
+Requires Node.js `^22.19 || >=24`, dsh `0.2.0-rc.1`, and dsh-TUI `>=0.11.2 <0.12.0`.
 
 ```sh
 dsh plugin --profile dsh-tui add dsh-tui-mcp-manager
@@ -77,6 +77,7 @@ On first use, a `Default` Set is created from existing MCP servers; after saving
 - Writes use a sidecar lock, `fsync`, and atomic rename; content outside the managed block is preserved.
 - Globally deleting a server also removes its references from every Set.
 - Sensitive values go only to the credentials provider; configuration stores references.
+- When upgrading from older dsh releases, a profile without a managed block imports its legacy MCP configuration once from `settings.yaml` or `settings.yaml.imported`.
 
 <details>
 <summary>Diagnostics and runtime behavior</summary>
@@ -144,7 +145,7 @@ Local `add .` is only for development. Regular users do not need to clone or bui
 
 ## Compatibility
 
-dsh-TUI 0.10.1 with dsh 0.1.5-rc.2 is the current build and runtime baseline. The package is pure ESM, MIT licensed, and published through GitHub Actions OIDC Trusted Publishing.
+dsh-TUI 0.11.2 with dsh 0.2.0-rc.1 is the current build and runtime baseline. The package is pure ESM, MIT licensed, and published through GitHub Actions OIDC Trusted Publishing.
 
 The plugin runs in the host process. Manifest permissions are audit and policy declarations, not an operating-system sandbox.
 

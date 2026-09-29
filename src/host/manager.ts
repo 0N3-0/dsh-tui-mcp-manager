@@ -1,11 +1,12 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
-import { type SettingsScope } from '@deepseek-ai/dsh-settings'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import * as yaml from 'js-yaml'
 import { constants } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
+import { access, readFile, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import {
   McpManagerSettingsSchema,
@@ -97,7 +98,6 @@ export class McpManagerService extends Service {
   private readonly profile: ProfileIdentity
   private readonly store?: ProfilePatchStore
   private readonly setStore?: ProfileSetStore
-  private legacySettings?: SettingsScope<unknown>
   private readonly records = new Map<string, RuntimeRecord>()
   private readonly changeListeners = new Set<() => void>()
   private revision = 0
@@ -111,10 +111,12 @@ export class McpManagerService extends Service {
     this.profile = detectProfile(ctx)
     this.store = this.profile.patchPath === undefined ? undefined : new ProfilePatchStore(this.profile.patchPath)
     this.setStore = this.profile.dir === undefined ? undefined : new ProfileSetStore(join(this.profile.dir, 'mcp-manager.sets.yml'))
-    this.installLegacySettingsMigration()
     this.installToolRegistryTracking()
     this.installPatchFailureTracking()
     this.installRpcChannel()
+    void this.enqueue(() => this.syncFromFile()).catch((error) => {
+      this.ctx.logger.error(`dsh-tui-mcp-manager: initial profile sync failed: ${errorText(error)}`)
+    })
   }
 
   // ── wiring ────────────────────────────────────────────────────────────────
@@ -144,21 +146,6 @@ export class McpManagerService extends Service {
           this.ctx.logger?.warn?.('mcp-manager change listener failed: %s', errorText(error))
         }
       }
-    })
-  }
-
-  /** Register the old section read-only so an existing install can migrate once. */
-  private installLegacySettingsMigration(): void {
-    this.ctx.inject(['settings'], (settingsCtx) => {
-      const scope = settingsCtx.settings.register(LEGACY_SETTINGS_NAMESPACE, McpManagerSettingsSchema, {
-        applies: 'restart',
-        validate: validateMcpManagerSettings,
-      })
-      this.legacySettings = scope
-      settingsCtx.effect(() => () => {
-        this.legacySettings = undefined
-      }, 'mcp-manager.legacy-settings')
-      void this.enqueue(() => this.syncFromFile())
     })
   }
 
@@ -234,17 +221,36 @@ export class McpManagerService extends Service {
     return this.store
   }
 
-  private legacyServers(): ManagedServerRecord[] {
-    if (this.legacySettings === undefined) return []
-    const value = this.legacySettings.get() as { profiles?: Record<string, { servers?: ManagedServerRecord[] }> }
-    return (value.profiles?.[this.profile.key]?.servers ?? []).map((server) => normalizeServerRecord(cloneServerRecord(server)))
+  private async legacyServers(): Promise<ManagedServerRecord[]> {
+    // dsh-settings 0.2 removed SettingsScope/register and renamed the old
+    // settings.yaml to settings.yaml.imported. Read that backup directly only
+    // when the profile has no managed block, without editing the backup.
+    for (const filename of ['settings.yaml', 'settings.yaml.imported']) {
+      let content: string
+      try {
+        content = await readFile(join(resolveDshHome(), filename), 'utf8')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw error
+      }
+      const document = yaml.load(content, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown> | undefined
+      const rawSection = document?.[LEGACY_SETTINGS_NAMESPACE]
+      if (rawSection === undefined) continue
+      const section = McpManagerSettingsSchema(rawSection as never) as {
+        profiles?: Record<string, { servers?: unknown[] }>
+      }
+      validateMcpManagerSettings(section)
+      const servers = section.profiles?.[this.profile.key]?.servers ?? []
+      return servers.map((server) => normalizeServerRecord(cloneServerRecord(server as ManagedServerRecord)))
+    }
+    return []
   }
 
   private async readStorage(): Promise<PatchStoreSnapshot> {
     const store = this.requireStore()
     let snapshot = await store.read()
     if (!snapshot.hasManagedBlock) {
-      const legacy = this.legacyServers()
+      const legacy = await this.legacyServers()
       if (legacy.length > 0) {
         this.assertNoExternalNamespaceConflict(legacy)
         snapshot = await store.write(legacy)
