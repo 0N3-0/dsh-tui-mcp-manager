@@ -35,6 +35,7 @@ export interface ManagedServerRecord {
     headers?: Record<string, string>;
     secretHeaders?: Record<string, SecretHeaderRef>;
     toolCallTimeoutMs?: number;
+    maxInstructionBytes?: number;
     failOnStartupError?: boolean;
     reconnect?: ReconnectConfig;
 }
@@ -86,6 +87,7 @@ export interface McpServerView {
         credential: CredentialStateView;
     }>;
     toolCallTimeoutMs?: number;
+    maxInstructionBytes?: number;
     failOnStartupError?: boolean;
     reconnect?: ReconnectConfig;
 }
@@ -93,7 +95,7 @@ export interface McpManagerSnapshot {
     revision: number;
     profile: {
         key: string;
-        source: 'ctx.baseUrl' | 'fallback';
+        source: 'profileContext' | 'ctx.baseUrl' | 'fallback';
     };
     storage: {
         available: boolean;

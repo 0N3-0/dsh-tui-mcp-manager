@@ -997,6 +997,7 @@ export class McpManagerService extends Service {
       tools: record.tools.map((tool) => ({ ...tool, parameters: tool.parameters ?? {} })),
       updatedAt: record.updatedAt,
       toolCallTimeoutMs: config.toolCallTimeoutMs,
+      maxInstructionBytes: config.maxInstructionBytes,
       failOnStartupError: config.failOnStartupError,
       reconnect: config.reconnect,
     }

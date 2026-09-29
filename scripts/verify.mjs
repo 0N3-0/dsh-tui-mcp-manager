@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 import * as yaml from 'js-yaml'
+import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 
 const manifest = JSON.parse(await readFile(new URL('../dsh-plugin.json', import.meta.url), 'utf8'))
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -61,6 +63,41 @@ assert.match(tuiEntry, /tuiScenes/)
 assert.doesNotMatch(tuiEntry, /tuiDialogs|runManager|TuiDialogRuntime/)
 assert.match(tuiEntry, /inject\(\[['"]tuiScenes['"]\]/)
 assert.match(tuiEntry, /const scenes = tuiCtx\.get\?\.\(['"]tuiScenes['"], false\)/)
+{
+  const { applyTui } = await import('../lib/types/tui/index.js')
+  const warnings = []
+  let directRegistrations = 0
+  let admittedRegistrations = 0
+  const scenes = { register: () => () => {}, open: () => true }
+  const pluginHost = {
+    registerCommand: () => {
+      admittedRegistrations += 1
+      throw Object.assign(new Error('not admitted'), { code: 'COMPONENT_NOT_ADMITTED' })
+    },
+  }
+  const services = {
+    tuiScenes: scenes,
+    tuiPluginHost: pluginHost,
+    commands: { register: () => { directRegistrations += 1; return () => {} } },
+  }
+  const tuiCtx = {
+    get: (name) => services[name],
+    effect: (register) => register(),
+    logger: { warn: (message) => warnings.push(message) },
+  }
+  applyTui({ inject: (_names, register) => register(tuiCtx) }, {})
+  assert.equal(admittedRegistrations, 1)
+  assert.equal(directRegistrations, 1, 'TUI 0.11.2 must still expose the command without Loader admission')
+  assert.match(warnings[0], /without host attribution or per-plugin command grants/)
+  delete services.tuiPluginHost
+  applyTui({ inject: (_names, register) => register(tuiCtx) }, {})
+  assert.equal(directRegistrations, 2)
+  assert.match(warnings[1], /plugin host is unavailable/)
+  services.tuiPluginHost = { registerCommand: () => { admittedRegistrations += 1; return () => {} } }
+  applyTui({ inject: (_names, register) => register(tuiCtx) }, {})
+  assert.equal(admittedRegistrations, 2)
+  assert.equal(directRegistrations, 2, 'admitted commands must use only the mediated host path')
+}
 const sceneEntry = await readFile(new URL('../lib/types/tui/scene.js', import.meta.url), 'utf8')
 const sceneControllerEntry = await readFile(new URL('../lib/types/tui/scene-controller.js', import.meta.url), 'utf8')
 assert.doesNotMatch(sceneEntry, /\bScrollBox\s*[,)]|ink-box/)
@@ -237,10 +274,17 @@ Object.assign(httpDraft, {
   url: 'https://mcp.context7.com/mcp',
   headers: '',
   secretHeaders: 'api-key=CONTEXT7_API_KEY',
+  maxInstructionBytes: '8192',
   credentialValues: { CONTEXT7_API_KEY: 'not-persisted-in-loader-row' },
 })
 assert.equal(serverForm.validateServerDraft(httpDraft, emptySnapshot, 'create'), undefined)
 const httpSubmission = serverForm.buildServerSubmission(httpDraft)
+assert.equal(httpSubmission.record.maxInstructionBytes, 8192)
+const { toMcpClientSkeleton } = await import('../lib/types/host/schema.js')
+assert.equal(toMcpClientSkeleton(httpSubmission.record).maxInstructionBytes, 8192)
+httpDraft.maxInstructionBytes = '1.5'
+assert.equal(serverForm.validateServerDraft(httpDraft, emptySnapshot, 'create'), 'invalid-positive-integer')
+httpDraft.maxInstructionBytes = '8192'
 assert.deepEqual(httpSubmission.record.secretHeaders, {
   'api-key': { ref: 'CONTEXT7_API_KEY' },
 })
@@ -311,6 +355,36 @@ const {
 } = await import('../lib/types/host/set-store.js')
 const temp = await mkdtemp(join(tmpdir(), 'dsh-tui-mcp-manager-'))
 try {
+  {
+    const { detectProfile } = await import('../lib/types/host/profile.js')
+    const dir = join(temp, 'official-profile')
+    const patchPath = join(dir, 'cordis.patch.yml')
+    assert.deepEqual(detectProfile({
+      baseUrl: pathToFileURL(join(temp, 'wrong-profile')).href,
+      get: () => ({ name: 'official', dir, patchPath }),
+    }), { key: 'official', source: 'profileContext', dir, patchPath })
+  }
+  {
+    const { ProfilePatchStore } = await import('../lib/types/host/patch-store.js')
+    let signalEntered
+    let releaseLock
+    const entered = new Promise((resolve) => { signalEntered = resolve })
+    const release = new Promise((resolve) => { releaseLock = resolve })
+    const held = withFileLock(join(temp, 'package.json'), async () => {
+      signalEntered()
+      await release
+    })
+    await entered
+    let finished = false
+    const pending = new ProfilePatchStore(join(temp, 'cordis.patch.yml'))
+      .write([]).then(() => { finished = true })
+    await delay(50)
+    assert.equal(finished, false, 'managed patch writes must wait for the DSH profile lock')
+    releaseLock()
+    await held
+    await pending
+    assert.equal(finished, true)
+  }
   const store = new ProfileSetStore(join(temp, 'mcp-manager.sets.yml'))
   await store.write([
     { id: 'research', name: 'Research', serverIds: ['context7', 'shared'] },
@@ -372,6 +446,7 @@ try {
       env: {},
       secretEnv: {},
       toolCallTimeoutMs: 60_000,
+      maxInstructionBytes: 8192,
       failOnStartupError: false,
       reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30_000, maxAttempts: 10 },
     }
@@ -382,6 +457,8 @@ try {
       serverName: 'companion',
     }
     await externalPatchStore.write([server, companionServer])
+    assert.deepEqual((await externalPatchStore.read()).servers.map((item) => item.maxInstructionBytes), [8192, 8192])
+    assert.match(await readFile(patchPath, 'utf8'), /maxInstructionBytes: 8192/)
 
     const ctx = new Context().extend({ baseUrl: pathToFileURL(`${profileDir}/`).href })
     let toolSchemaReads = 0

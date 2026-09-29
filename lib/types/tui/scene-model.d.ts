@@ -53,7 +53,7 @@ export interface SetEditorState {
     };
     error?: string;
 }
-export type ServerTextField = 'id' | 'displayName' | 'serverName' | 'command' | 'args' | 'cwd' | 'env' | 'secretEnv' | 'url' | 'headers' | 'secretHeaders' | 'toolCallTimeoutMs' | 'reconnectInitialDelayMs' | 'reconnectMaxDelayMs' | 'reconnectMaxAttempts';
+export type ServerTextField = 'id' | 'displayName' | 'serverName' | 'command' | 'args' | 'cwd' | 'env' | 'secretEnv' | 'url' | 'headers' | 'secretHeaders' | 'toolCallTimeoutMs' | 'maxInstructionBytes' | 'reconnectInitialDelayMs' | 'reconnectMaxDelayMs' | 'reconnectMaxAttempts';
 export type ServerEditorRow = {
     kind: 'field';
     field: ServerTextField;

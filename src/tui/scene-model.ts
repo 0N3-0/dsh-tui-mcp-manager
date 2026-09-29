@@ -53,6 +53,7 @@ export type ServerTextField =
   | 'headers'
   | 'secretHeaders'
   | 'toolCallTimeoutMs'
+  | 'maxInstructionBytes'
   | 'reconnectInitialDelayMs'
   | 'reconnectMaxDelayMs'
   | 'reconnectMaxAttempts'

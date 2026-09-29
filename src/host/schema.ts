@@ -24,6 +24,7 @@ const SecretHeaderSchema = Schema.object({
 const SharedMcpFields = {
   serverName: Schema.string().pattern(SERVER_NAME_PATTERN).required(),
   toolCallTimeoutMs: Schema.number().min(1).max(MAX_TIMER_DELAY_MS).default(60_000),
+  maxInstructionBytes: Schema.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(32_768),
   failOnStartupError: Schema.boolean().default(false),
   reconnect: ReconnectSchema,
 }
@@ -198,6 +199,7 @@ export function toMcpClientSkeleton(record: ManagedServerRecord): Record<string,
   const common = {
     serverName: record.serverName,
     toolCallTimeoutMs: record.toolCallTimeoutMs ?? 60_000,
+    maxInstructionBytes: record.maxInstructionBytes ?? 32_768,
     failOnStartupError: record.failOnStartupError ?? false,
     reconnect: record.reconnect,
   }

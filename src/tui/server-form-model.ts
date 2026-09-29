@@ -26,6 +26,7 @@ export interface ServerFormDraft {
   secretHeaders: string
   enabled: boolean
   toolCallTimeoutMs: string
+  maxInstructionBytes: string
   failOnStartupError: boolean
   reconnectEnabled: boolean
   reconnectInitialDelayMs: string
@@ -108,6 +109,7 @@ export function createServerDraft(
     secretHeaders: formatSecretHeaders(existing?.secretHeaders),
     enabled: duplicate ? false : existing?.enabled ?? false,
     toolCallTimeoutMs: String(existing?.toolCallTimeoutMs ?? 60_000),
+    maxInstructionBytes: String(existing?.maxInstructionBytes ?? 32_768),
     failOnStartupError: existing?.failOnStartupError ?? false,
     reconnectEnabled: existing?.reconnect?.enabled ?? true,
     reconnectInitialDelayMs: String(existing?.reconnect?.initialDelayMs ?? 500),
@@ -161,6 +163,7 @@ export function validateServerDraft(
     if (!isSecretHeaderMap(draft.secretHeaders)) return 'invalid-secret-headers'
   }
   if (positiveNumber(draft.toolCallTimeoutMs) === undefined) return 'invalid-positive-number'
+  if (positiveInteger(draft.maxInstructionBytes) === undefined) return 'invalid-positive-integer'
   if (positiveNumber(draft.reconnectInitialDelayMs) === undefined) return 'invalid-positive-number'
   if (positiveNumber(draft.reconnectMaxDelayMs) === undefined) return 'invalid-positive-number'
   if (positiveInteger(draft.reconnectMaxAttempts) === undefined) return 'invalid-positive-integer'
@@ -175,6 +178,7 @@ export function buildServerSubmission(draft: ServerFormDraft): ServerFormSubmiss
     serverName: draft.serverName.trim(),
     enabled: draft.enabled,
     toolCallTimeoutMs: Number(draft.toolCallTimeoutMs),
+    maxInstructionBytes: Number(draft.maxInstructionBytes),
     failOnStartupError: draft.failOnStartupError,
     reconnect: {
       enabled: draft.reconnectEnabled,

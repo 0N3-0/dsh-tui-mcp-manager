@@ -94,6 +94,7 @@ declare const STRINGS: {
         readonly error: "Error";
         readonly credentialRefs: "Credential references";
         readonly timeout: "Tool timeout";
+        readonly maxInstructionBytes: "Server instruction limit";
         readonly failStartup: "Fail on startup error";
         readonly reconnectPolicy: "Reconnect policy";
         readonly environment: "Environment";
@@ -167,6 +168,7 @@ declare const STRINGS: {
         readonly helpHeaders: "Non-secret request headers in NAME=VALUE form.";
         readonly helpSecretHeaders: "Map sensitive headers to credential references, optionally with a literal prefix.";
         readonly helpTimeout: "Maximum duration of one tool call, in milliseconds.";
+        readonly helpMaxInstructionBytes: "Maximum UTF-8 bytes accepted from server instructions; the default is 32,768.";
         readonly helpFailStartup: "Stop profile startup when this server cannot start.";
         readonly helpReconnectEnabled: "Automatically reconnect after an unexpected disconnect.";
         readonly helpReconnectInitialDelay: "Delay before the first reconnect attempt, in milliseconds.";
@@ -195,7 +197,7 @@ declare const STRINGS: {
         readonly plainSecretHeaders: "Sensitive headers must use credential references.";
         readonly invalidSecretHeaders: "Use Header=REF or Header=Prefix REF for credential headers.";
         readonly invalidPositiveNumber: "Timeout and delays must be positive numbers.";
-        readonly invalidPositiveInteger: "Maximum reconnect attempts must be a positive integer.";
+        readonly invalidPositiveInteger: "Instruction byte limit and reconnect attempts must be positive integers.";
         readonly invalidReconnectDelays: "Initial reconnect delay cannot exceed the maximum delay.";
         readonly duplicate: "duplicate";
         readonly previewLimit: "Active Sets control normal startup; stopping a server does not change Set membership.";
@@ -291,6 +293,7 @@ declare const STRINGS: {
         readonly error: "错误";
         readonly credentialRefs: "凭据引用";
         readonly timeout: "工具超时";
+        readonly maxInstructionBytes: "服务器说明字节上限";
         readonly failStartup: "启动失败时终止";
         readonly reconnectPolicy: "重连策略";
         readonly environment: "环境变量";
@@ -364,6 +367,7 @@ declare const STRINGS: {
         readonly helpHeaders: "非敏感请求头，使用 NAME=VALUE 格式。";
         readonly helpSecretHeaders: "将敏感请求头映射到凭据引用，可以附带固定前缀。";
         readonly helpTimeout: "单次工具调用允许执行的最长时间，单位为毫秒。";
+        readonly helpMaxInstructionBytes: "允许接收的服务器说明 UTF-8 字节上限；默认为 32768。";
         readonly helpFailStartup: "此服务器启动失败时是否终止 profile 启动。";
         readonly helpReconnectEnabled: "连接意外断开后是否自动重连。";
         readonly helpReconnectInitialDelay: "第一次尝试重连前的等待时间，单位为毫秒。";
@@ -392,7 +396,7 @@ declare const STRINGS: {
         readonly plainSecretHeaders: "敏感请求头必须改用凭据引用。";
         readonly invalidSecretHeaders: "凭据请求头请使用 Header=REF 或 Header=Prefix REF。";
         readonly invalidPositiveNumber: "超时和延迟必须为正数。";
-        readonly invalidPositiveInteger: "最大重连次数必须为正整数。";
+        readonly invalidPositiveInteger: "服务器说明字节上限与最大重连次数必须为正整数。";
         readonly invalidReconnectDelays: "初始重连延迟不能大于最大重连延迟。";
         readonly duplicate: "复制";
         readonly previewLimit: "活动集合决定正常启动；停止服务器不会修改集合成员。";

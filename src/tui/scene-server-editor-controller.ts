@@ -25,6 +25,7 @@ import {
   createServerDraft,
   credentialReferences,
   positiveNumber,
+  positiveInteger,
   validateServerDraft,
   type ServerFormDraft,
   type ServerFormIssue,
@@ -92,7 +93,9 @@ function serverIssueField(issue: ServerFormIssue, draft: ServerFormDraft): Serve
       if (positiveNumber(draft.toolCallTimeoutMs) === undefined) return 'toolCallTimeoutMs'
       if (positiveNumber(draft.reconnectInitialDelayMs) === undefined) return 'reconnectInitialDelayMs'
       return 'reconnectMaxDelayMs'
-    case 'invalid-positive-integer': return 'reconnectMaxAttempts'
+    case 'invalid-positive-integer': return positiveInteger(draft.maxInstructionBytes) === undefined
+      ? 'maxInstructionBytes'
+      : 'reconnectMaxAttempts'
     case 'invalid-reconnect-delays': return 'reconnectInitialDelayMs'
   }
 }
@@ -119,6 +122,7 @@ export function serverEditorRowsFor(editor: ServerEditorState | undefined): Serv
         ]),
     ...credentialReferences(editor.draft).map((ref) => ({ kind: 'credential' as const, ref })),
     { kind: 'field', field: 'toolCallTimeoutMs', editable: true },
+    { kind: 'field', field: 'maxInstructionBytes', editable: true },
     { kind: 'boolean', field: 'failOnStartupError' },
     { kind: 'boolean', field: 'reconnectEnabled' },
     { kind: 'field', field: 'reconnectInitialDelayMs', editable: true },
@@ -390,6 +394,7 @@ export function useServerEditorController({
               displayName: 80,
               serverName: 32,
               toolCallTimeoutMs: 16,
+              maxInstructionBytes: 16,
               reconnectInitialDelayMs: 16,
               reconnectMaxDelayMs: 16,
               reconnectMaxAttempts: 16,

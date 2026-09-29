@@ -15,6 +15,7 @@ export interface ServerFormDraft {
     secretHeaders: string;
     enabled: boolean;
     toolCallTimeoutMs: string;
+    maxInstructionBytes: string;
     failOnStartupError: boolean;
     reconnectEnabled: boolean;
     reconnectInitialDelayMs: string;

@@ -20,6 +20,8 @@ dsh --profile dsh-tui
 
 进入 TUI 后运行 `/mcp-manager`。界面语言跟随 dsh-TUI，可用 `/lang zh` 或 `/lang en` 切换。
 
+dsh-TUI 0.11.2 尚未向第三方 Loader 插件开放命令接纳流程。本插件在该版本中通过 `commands` 服务注册 `/mcp-manager`；TUI 的插件归属和针对该命令的单插件 `commands.invoke` 授权暂不生效。宿主开放接纳后会优先使用托管注册。
+
 ## 预览
 
 ![MCP 服务器概览](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-servers.png)
@@ -43,6 +45,8 @@ dsh --profile dsh-tui
 | 工具 | 浏览工具说明与输入 Schema，按名称或说明搜索 |
 | 诊断 | 打开页面即自动检查配置、连接、运行时和工具注册 |
 | 凭据 | 通过 DSH credentials 引用敏感环境变量与请求头 |
+
+服务器编辑器支持 dsh 0.2 的 `maxInstructionBytes`，用于限制服务器说明进入系统提示词时的 UTF-8 字节数，默认 32768。MCP 资源由 dsh 的共享资源工具按需读取。
 
 服务器、Set 和工具列表都支持 `/` 搜索。服务器概览还会显示它所属的全部 Set：`◆` 表示活动，`◇` 表示未活动。
 
@@ -74,7 +78,7 @@ Set B: websearch, ghgrep
 
 - 服务器配置直接读写当前 profile 的 `cordis.patch.yml`，不维护第二份数据库。
 - Set 保存在同目录的 `mcp-manager.sets.yml`，只记录 Set 信息和服务器 ID。
-- 写入使用旁路锁、`fsync` 和原子 rename；managed block 外的内容保持不变。
+- 写入与 dsh 的 Profile 配置编辑器共用锁，并使用 `fsync` 和原子 rename；managed block 外的内容保持不变。
 - 删除服务器时会同步清理所有 Set 引用。
 - 敏感值只写入 credentials provider，配置文件中仅保留引用。
 - 升级旧版 dsh 时，如果 profile 尚无 managed block，会从保留的 `settings.yaml` 或 `settings.yaml.imported` 一次性导入旧 MCP 配置。

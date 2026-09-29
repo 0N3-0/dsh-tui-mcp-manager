@@ -20,6 +20,8 @@ dsh --profile dsh-tui
 
 Run `/mcp-manager` inside the TUI. The interface follows dsh-TUI's language setting; use `/lang zh` or `/lang en` to switch.
 
+In dsh-TUI 0.11.2, third-party Loader plugins cannot yet enter the host's command admission flow. The plugin registers `/mcp-manager` through the commands service on that version, so TUI plugin attribution and per-plugin `commands.invoke` grants do not apply to this command. Mediated registration takes priority when the host admits the activation.
+
 ## Preview
 
 ![MCP server overview](https://raw.githubusercontent.com/0N3-0/dsh-tui-mcp-manager/main/docs/images/mcp-manager-servers.png)
@@ -43,6 +45,8 @@ Run `/mcp-manager` inside the TUI. The interface follows dsh-TUI's language sett
 | Tools | Inspect descriptions and input schemas; search by name or description |
 | Diagnostics | Automatically check configuration, connectivity, runtime state, and tools |
 | Credentials | Reference sensitive environment variables and headers through DSH credentials |
+
+The server editor exposes dsh 0.2's `maxInstructionBytes` limit for UTF-8 server instructions in the system prompt (default: 32,768). DSH's shared resource tools read MCP resources on demand.
 
 Server, Set, and tool lists all support `/` search. Server overviews list every containing Set: `◆` is active and `◇` is inactive.
 
@@ -74,7 +78,7 @@ On first use, a `Default` Set is created from existing MCP servers; after saving
 
 - Server configuration is read from and written to the active profile's `cordis.patch.yml`; there is no second database.
 - Sets live in `mcp-manager.sets.yml` beside the patch and contain only Set metadata and server IDs.
-- Writes use a sidecar lock, `fsync`, and atomic rename; content outside the managed block is preserved.
+- Writes share the DSH profile configuration lock and use `fsync` and atomic rename; content outside the managed block is preserved.
 - Globally deleting a server also removes its references from every Set.
 - Sensitive values go only to the credentials provider; configuration stores references.
 - When upgrading from older dsh releases, a profile without a managed block imports its legacy MCP configuration once from `settings.yaml` or `settings.yaml.imported`.

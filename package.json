@@ -1,6 +1,6 @@
 {
   "name": "dsh-tui-mcp-manager",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Native full-screen MCP manager for dsh-TUI",
   "type": "module",
   "main": "./lib/types/index.js",
@@ -37,7 +37,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify": "node scripts/verify.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "check": "npm run typecheck && npm run build && npm run verify",
+    "check": "npm run typecheck && npm run build && npm run verify && npm run verify:mcp",
+    "verify:mcp": "node scripts/verify-mcp.mjs",
     "prepack": "npm run check",
     "smoke:package": "node scripts/smoke-package.mjs"
   },
@@ -90,8 +91,8 @@
     "@deepseek-ai/dsh-invariants": "0.2.0-rc.1",
     "@deepseek-ai/dsh-llm": "0.2.0-rc.1",
     "@deepseek-ai/dsh-mcp-client": "0.2.0-rc.1",
-    "@deepseek-ai/dsh-scope": "0.2.0-rc.1",
     "@deepseek-ai/dsh-sandbox": "0.2.0-rc.1",
+    "@deepseek-ai/dsh-scope": "0.2.0-rc.1",
     "@deepseek-ai/dsh-session": "0.2.0-rc.1",
     "@deepseek-ai/dsh-settings": "0.2.0-rc.1",
     "@deepseek-ai/dsh-subprocess": "0.2.0-rc.1",
@@ -99,11 +100,13 @@
     "@deepseek-ai/dsh-tools": "0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.4",
     "@deepseek-harness-tui/dsh-tui": "0.11.2",
+    "@modelcontextprotocol/server": "2.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.1",
     "js-yaml": "4.3.1"
   }
 }

@@ -108,16 +108,21 @@ export function applyTui(ctx: Context, manager: McpManagerService): void {
       const commands = tuiCtx.get?.('commands', false)
       let disposeCommand: (() => void) | undefined
       try {
-        disposeCommand = pluginHost
-          ? pluginHost.registerCommand(tuiCtx, 'dsh-tui.mcp-manager', definition)
-          : commands?.register?.(definition)
-        debug(`command registered through ${pluginHost ? 'tuiPluginHost' : 'commands service'}`)
+        if (pluginHost) {
+          disposeCommand = pluginHost.registerCommand(tuiCtx, 'dsh-tui.mcp-manager', definition)
+          debug('command registered through tuiPluginHost')
+        } else if (commands?.register) {
+          disposeCommand = commands.register(definition)
+          tuiCtx.logger?.warn?.('dsh-tui-mcp-manager: plugin host is unavailable; /mcp-manager is registered without host attribution')
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         const code = (error as { code?: unknown })?.code
         if (code === 'COMPONENT_NOT_ADMITTED' && commands?.register) {
+          // dsh-TUI 0.11.2 does not yet admit third-party Loader activations.
+          // Keep the command usable until its Loader admission seam is public.
           disposeCommand = commands.register(definition)
-          debug('command registered through commands service: host did not admit this Loader activation')
+          tuiCtx.logger?.warn?.('dsh-tui-mcp-manager: this Loader activation is not admitted by dsh-TUI; /mcp-manager is registered without host attribution or per-plugin command grants')
         } else {
           disposeTree?.()
           debug(`command registration skipped: ${message}`)

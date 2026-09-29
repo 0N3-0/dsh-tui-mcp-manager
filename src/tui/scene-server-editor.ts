@@ -33,6 +33,7 @@ function serverFieldLabel(lang: SceneLanguage, field: ServerTextField): string {
     case 'headers': return text(lang, 'headers')
     case 'secretHeaders': return text(lang, 'secretHeaders')
     case 'toolCallTimeoutMs': return text(lang, 'timeout')
+    case 'maxInstructionBytes': return text(lang, 'maxInstructionBytes')
     case 'reconnectInitialDelayMs': return text(lang, 'reconnectInitialDelay')
     case 'reconnectMaxDelayMs': return text(lang, 'reconnectMaxDelay')
     case 'reconnectMaxAttempts': return text(lang, 'reconnectMaxAttempts')
@@ -45,6 +46,7 @@ function serverFieldRequired(field: ServerTextField): boolean {
     || field === 'command'
     || field === 'url'
     || field === 'toolCallTimeoutMs'
+    || field === 'maxInstructionBytes'
     || field === 'reconnectInitialDelayMs'
     || field === 'reconnectMaxDelayMs'
     || field === 'reconnectMaxAttempts'
@@ -64,6 +66,7 @@ function serverFieldHelpKey(field: ServerTextField) {
     case 'headers': return 'helpHeaders'
     case 'secretHeaders': return 'helpSecretHeaders'
     case 'toolCallTimeoutMs': return 'helpTimeout'
+    case 'maxInstructionBytes': return 'helpMaxInstructionBytes'
     case 'reconnectInitialDelayMs': return 'helpReconnectInitialDelay'
     case 'reconnectMaxDelayMs': return 'helpReconnectMaxDelay'
     case 'reconnectMaxAttempts': return 'helpReconnectMaxAttempts'

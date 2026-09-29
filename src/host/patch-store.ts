@@ -1,8 +1,8 @@
 import * as yaml from 'js-yaml'
 import { access, constants, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
+import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import type { ManagedServerRecord } from './types.js'
 import { cloneServerRecord, normalizeServerRecord, toMcpClientSkeleton } from './schema.js'
 
@@ -13,7 +13,6 @@ const ROW_PREFIX = 'mcp-manager--'
 const DIRECT_PLUGIN = '@deepseek-ai/dsh-mcp-client'
 const CREDENTIAL_PLUGIN = 'dsh-tui-mcp-manager/server'
 const LEGACY_CREDENTIAL_PLUGIN = 'dsh-mcp-manager/server'
-const LOCK_TIMEOUT_MS = 5_000
 
 const JsExpr = new yaml.Type('tag:yaml.org,2002:js', {
   kind: 'scalar',
@@ -242,30 +241,6 @@ async function writable(filename: string): Promise<boolean> {
   }
 }
 
-async function withFileLock<T>(filename: string, operation: () => Promise<T>): Promise<T> {
-  await mkdir(dirname(filename), { recursive: true })
-  const lockPath = `${filename}.mcp-manager.lock`
-  const deadline = Date.now() + LOCK_TIMEOUT_MS
-  let handle
-  while (true) {
-    try {
-      handle = await open(lockPath, 'wx', 0o600)
-      break
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) {
-        throw new Error(`failed to acquire patch writer lock ${lockPath}: ${errorText(error)}`, { cause: error })
-      }
-      await delay(25)
-    }
-  }
-  try {
-    return await operation()
-  } finally {
-    await handle.close()
-    await unlink(lockPath).catch(() => {})
-  }
-}
-
 async function writeAtomic(filename: string, content: string): Promise<void> {
   await mkdir(dirname(filename), { recursive: true })
   let mode = 0o600
@@ -313,7 +288,9 @@ export class ProfilePatchStore {
 
   async write(servers: ManagedServerRecord[]): Promise<PatchStoreSnapshot> {
     const normalized = servers.map((server) => normalizeServerRecord(cloneServerRecord(server)))
-    return withFileLock(this.path, async () => {
+    // DSH's config editor and profile package operations lock package.json.
+    // Share that lock so their patch edits cannot overwrite this managed block.
+    return withFileLock(join(dirname(this.path), 'package.json'), async () => {
       const current = await this.readText()
       parseManagedServers(current, this.path)
       const next = replaceManagedBlock(current, renderBlock(normalized))

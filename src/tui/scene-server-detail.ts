@@ -267,6 +267,7 @@ export function renderServerDetailView({
           row(text(lang, 'credentialRefs'), Object.values(server.secretHeaders ?? {}).map((entry) => entry.ref).join(', ') || '-'),
         ),
     row(text(lang, 'timeout'), `${server.toolCallTimeoutMs ?? 60_000} ms`),
+    row(text(lang, 'maxInstructionBytes'), `${server.maxInstructionBytes ?? 32_768} B`),
     row(text(lang, 'failStartup'), yesNo(lang, server.failOnStartupError ?? false)),
     row(text(lang, 'reconnectPolicy'), server.reconnect?.enabled === false
       ? text(lang, 'disabled')

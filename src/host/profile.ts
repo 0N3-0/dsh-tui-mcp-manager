@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 export interface ProfileIdentity {
   key: string
-  source: 'ctx.baseUrl' | 'fallback'
+  source: 'profileContext' | 'ctx.baseUrl' | 'fallback'
   dir?: string
   patchPath?: string
 }
@@ -13,14 +13,18 @@ export interface ProfileIdentity {
 /**
  * Resolve the DSH profile this process booted.
  *
- * `dsh --profile <name>` anchors the Loader's `ctx.baseUrl` at
- * `$DSH_HOME/profiles/<name>/`; that anchor is the only public context fact
- * naming the active profile today. There is no dedicated `ctx.profile`
- * service yet (see README: upstream extension candidates), so this helper
- * validates that the anchor really sits under `$DSH_HOME/profiles` before
- * trusting it and otherwise falls back to a shared `default` section.
+ * Current DSH profiles expose their identity through `ctx.profileContext`.
+ * Keep the validated Loader baseUrl path for standalone compositions that
+ * mount this plugin without the profile service.
  */
 export function detectProfile(ctx: Context): ProfileIdentity {
+  const profile = (ctx as unknown as { get(name: string, fallback: false): unknown })
+    .get('profileContext', false) as { name?: unknown; dir?: unknown; patchPath?: unknown } | undefined
+  if (profile && typeof profile.name === 'string' && profile.name !== ''
+    && typeof profile.dir === 'string' && isAbsolute(profile.dir)
+    && typeof profile.patchPath === 'string' && isAbsolute(profile.patchPath)) {
+    return { key: profile.name, source: 'profileContext', dir: profile.dir, patchPath: profile.patchPath }
+  }
   const baseUrl = ctx.baseUrl
   if (baseUrl !== undefined) {
     try {
