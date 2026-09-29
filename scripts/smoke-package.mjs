@@ -76,7 +76,6 @@ try {
   assert.equal(typeof modules?.storeDir, 'string', 'pnpm storeDir is missing from node_modules/.modules.yaml')
   run('pnpm', [
     'install',
-    '--offline',
     '--ignore-scripts',
     '--store-dir',
     dirname(modules.storeDir),
